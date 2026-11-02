@@ -1,7 +1,13 @@
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from app.ai import AnalysisError, LLMServiceDep, QuestionAnalysis, ReplyError
+from app.ai import (
+    AnalysisError,
+    LLMServiceDep,
+    QuestionAnalysis,
+    ReplyError,
+    SupportReply,
+)
 from app.auth import CurrentCustomerDep
 from app.db.database import SessionDep
 
@@ -10,10 +16,6 @@ router = APIRouter(prefix="/support", tags=["support"])
 
 class AIRequest(BaseModel):
     question: str
-
-
-class MessageResponse(BaseModel):
-    message: str
 
 
 @router.post("/analyze")
@@ -30,9 +32,8 @@ async def messages(
     customer: CurrentCustomerDep,
     session: SessionDep,
     llm: LLMServiceDep,
-) -> MessageResponse:
+) -> SupportReply:
     try:
-        reply = await llm.generate_reply(request.question, session, customer.id)
+        return await llm.generate_reply(request.question, session, customer.id)
     except ReplyError as error:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
-    return MessageResponse(message=reply)

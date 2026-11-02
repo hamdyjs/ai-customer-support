@@ -28,12 +28,31 @@ def client(fake_llm):
     return TestClient(app)
 
 
-# A valid message returns 200 with the LLM service's reply.
-def test_messages_returns_the_reply(client):
+# A valid message returns 200 with the reply for the customer and the analysis,
+# using exactly these fields.
+def test_messages_returns_the_reply_and_analysis(client):
     response = client.post(MESSAGES_URL, json={"question": "What did I pay?"})
 
     assert response.status_code == 200
-    assert response.json() == {"message": "You were charged $49.00 on November 1."}
+    assert response.json() == {
+        "reply": "You were charged $49.00 on November 1.",
+        "analysis": {
+            "category": "billing",
+            "priority": "high",
+            "summary": "The customer was charged twice.",
+            "suggested_response": "We're looking into this for you.",
+            "human_review_recommended": True,
+        },
+    }
+
+
+# The route declares SupportReply as its response model, so FastAPI validates the
+# response and documents its shape.
+def test_messages_declares_the_response_model(client):
+    operation = client.get("/openapi.json").json()["paths"][MESSAGES_URL]["post"]
+    schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+
+    assert schema == {"$ref": "#/components/schemas/SupportReply"}
 
 
 # The route gives the LLM service the authenticated customer's ID, which is what

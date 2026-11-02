@@ -1,6 +1,6 @@
 import pytest
 
-from app.ai import QuestionAnalysis, QuestionCategory, get_llm_service
+from app.ai import QuestionAnalysis, QuestionCategory, SupportReply, get_llm_service
 from app.db.models import TicketPriority
 from app.main import app
 
@@ -10,13 +10,16 @@ class FakeLLMService:
         self.questions = []
         self.reply_calls = []
         self.error = None
-        self.reply = "You were charged $49.00 on November 1."
         self.analysis = QuestionAnalysis(
             category=QuestionCategory.billing,
             priority=TicketPriority.high,
             summary="The customer was charged twice.",
             suggested_response="We're looking into this for you.",
             human_review_recommended=True,
+        )
+        self.reply = SupportReply(
+            reply="You were charged $49.00 on November 1.",
+            analysis=self.analysis,
         )
 
     async def analyze_question(self, question: str) -> QuestionAnalysis:
@@ -25,7 +28,9 @@ class FakeLLMService:
             raise self.error
         return self.analysis
 
-    async def generate_reply(self, message: str, session, customer_id: str) -> str:
+    async def generate_reply(
+        self, message: str, session, customer_id: str
+    ) -> SupportReply:
         self.reply_calls.append((message, customer_id))
         if self.error:
             raise self.error

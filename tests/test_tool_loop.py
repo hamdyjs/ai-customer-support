@@ -7,9 +7,17 @@ import pytest
 from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.ai import MAX_LLM_CALLS, MODEL, LLMService, ReplyError
+from app.ai import MAX_LLM_CALLS, MODEL, LLMService, ReplyError, SupportReply
 from app.db.models import AccountStatus, Customer, Invoice, InvoiceStatus
 from app.tools import TOOL_DEFINITIONS
+
+ANALYSIS = {
+    "category": "billing",
+    "priority": "low",
+    "summary": "The customer asked what they paid.",
+    "suggested_response": "You paid $49.00.",
+    "human_review_recommended": False,
+}
 
 
 def text_block(text):
@@ -38,6 +46,11 @@ def message_response(content, stop_reason="end_turn"):
 
 def tool_response(*calls):
     return message_response(list(calls), stop_reason="tool_use")
+
+
+def reply_response(reply="You paid $49.00."):
+    body = {"reply": reply, "analysis": ANALYSIS}
+    return message_response([text_block(json.dumps(body))])
 
 
 class FakeClaude:
@@ -101,12 +114,26 @@ def session():
         yield session
 
 
+# Claude's final JSON answer becomes a validated SupportReply, with the reply and
+# the analysis as real Python objects.
+def test_returns_a_validated_reply_and_analysis(session):
+    claude = FakeClaude(reply_response("Hello!"))
+
+    result = claude.reply(session)
+
+    assert isinstance(result, SupportReply)
+    assert result.reply == "Hello!"
+    assert result.analysis.category == "billing"
+    assert result.analysis.human_review_recommended is False
+
+
 # When Claude answers straight away, no tool runs and only one call is made. The
 # first request must still offer Claude the tools.
 def test_returns_the_reply_without_tools(session):
-    claude = FakeClaude(message_response([text_block("Hello!")]))
+    claude = FakeClaude(reply_response())
 
-    assert claude.reply(session) == "Hello!"
+    claude.reply(session)
+
     assert len(claude.requests) == 1
     assert claude.requests[0]["tools"] == TOOL_DEFINITIONS
     assert claude.requests[0]["messages"] == [
@@ -114,15 +141,33 @@ def test_returns_the_reply_without_tools(session):
     ]
 
 
+# Every request sends a strict JSON schema with the reply and the nested analysis.
+# This is what makes Claude return structured output.
+def test_requests_structured_output(session):
+    claude = FakeClaude(tool_response(tool_call("get_customer")), reply_response())
+
+    claude.reply(session)
+
+    for request in claude.requests:
+        output_format = request["output_config"]["format"]
+        schema = output_format["schema"]
+        analysis = schema["$defs"]["QuestionAnalysis"]
+        assert output_format["type"] == "json_schema"
+        assert set(schema["properties"]) == {"reply", "analysis"}
+        assert schema["additionalProperties"] is False
+        assert set(analysis["properties"]) == set(ANALYSIS)
+        assert analysis["additionalProperties"] is False
+
+
 # The core loop: Claude asks for a tool, the tool's result goes back to Claude
 # linked by its ID, and Claude's next answer becomes the reply.
 def test_runs_the_tool_and_sends_the_result_back(session):
     claude = FakeClaude(
         tool_response(tool_call("get_invoices")),
-        message_response([text_block("You paid $49.00.")]),
+        reply_response("You paid $49.00."),
     )
 
-    assert claude.reply(session) == "You paid $49.00."
+    assert claude.reply(session).reply == "You paid $49.00."
 
     assistant, user = claude.requests[1]["messages"][1:]
     assert assistant["role"] == "assistant"
@@ -134,12 +179,27 @@ def test_runs_the_tool_and_sends_the_result_back(session):
     assert json.loads(tool_result["content"])[0]["id"] == "inv_1"
 
 
+# Text Claude writes alongside a tool call isn't the final answer, so it isn't
+# treated as JSON and doesn't fail the request.
+def test_text_alongside_a_tool_call_is_not_parsed(session):
+    claude = FakeClaude(
+        message_response(
+            [text_block("Let me check that."), tool_call("get_invoices")],
+            stop_reason="tool_use",
+        ),
+        reply_response("You paid $49.00."),
+    )
+
+    assert claude.reply(session).reply == "You paid $49.00."
+    assert len(claude.requests) == 2
+
+
 # Each step of the loop is printed: the customer's message, Claude's tool use and
 # text, and why each call stopped. Tool results stay out to keep the console short.
 def test_prints_each_step_of_the_loop(session, capsys):
     claude = FakeClaude(
         tool_response(tool_call("get_invoices")),
-        message_response([text_block("You paid $49.00.")]),
+        reply_response("You paid $49.00."),
     )
 
     claude.reply(session)
@@ -151,15 +211,12 @@ def test_prints_each_step_of_the_loop(session, capsys):
     assert "Tool result" not in output
     assert "inv_1" not in output
     assert "[LLM call 2] stop_reason=end_turn" in output
-    assert "Text: You paid $49.00." in output
+    assert "You paid $49.00." in output
 
 
 # An unknown tool is printed as an error, so it's easy to spot in the output.
 def test_prints_tool_errors(session, capsys):
-    claude = FakeClaude(
-        tool_response(tool_call("get_everything")),
-        message_response([text_block("Sorry.")]),
-    )
+    claude = FakeClaude(tool_response(tool_call("get_everything")), reply_response())
 
     claude.reply(session)
 
@@ -173,7 +230,7 @@ def test_sends_thinking_blocks_back_to_claude(session):
     thinking = {"type": "thinking", "thinking": "", "signature": "abc"}
     claude = FakeClaude(
         message_response([thinking, tool_call("get_invoices")], "tool_use"),
-        message_response([text_block("You paid $49.00.")]),
+        reply_response(),
     )
 
     claude.reply(session)
@@ -191,7 +248,7 @@ def test_sends_all_results_from_one_turn_in_one_message(session):
             tool_call("get_invoices", "toolu_1"),
             tool_call("get_customer", "toolu_2"),
         ),
-        message_response([text_block("Done.")]),
+        reply_response(),
     )
 
     claude.reply(session)
@@ -210,19 +267,16 @@ def test_supports_multiple_rounds_of_tools(session):
     claude = FakeClaude(
         tool_response(tool_call("get_customer", "toolu_1")),
         tool_response(tool_call("get_invoices", "toolu_2")),
-        message_response([text_block("Done.")]),
+        reply_response("Done."),
     )
 
-    assert claude.reply(session) == "Done."
+    assert claude.reply(session).reply == "Done."
     assert [len(request["messages"]) for request in claude.requests] == [1, 3, 5]
 
 
 # Tools use the customer given by our code, so results belong to that customer.
 def test_tools_run_for_the_given_customer(session):
-    claude = FakeClaude(
-        tool_response(tool_call("get_invoices")),
-        message_response([text_block("Done.")]),
-    )
+    claude = FakeClaude(tool_response(tool_call("get_invoices")), reply_response())
 
     claude.reply(session, customer_id="cust_008")
 
@@ -235,7 +289,7 @@ def test_tools_run_for_the_given_customer(session):
 def test_ignores_a_customer_id_from_claude(session):
     claude = FakeClaude(
         tool_response(tool_call("get_invoices", tool_input={"customer_id": "cust_008"})),
-        message_response([text_block("Done.")]),
+        reply_response(),
     )
 
     claude.reply(session, customer_id="cust_001")
@@ -249,10 +303,10 @@ def test_ignores_a_customer_id_from_claude(session):
 def test_unknown_tool_is_reported_back_to_claude(session):
     claude = FakeClaude(
         tool_response(tool_call("get_everything")),
-        message_response([text_block("Sorry, I can't look that up.")]),
+        reply_response("Sorry, I can't look that up."),
     )
 
-    assert claude.reply(session) == "Sorry, I can't look that up."
+    assert claude.reply(session).reply == "Sorry, I can't look that up."
 
     result = claude.requests[1]["messages"][-1]["content"][0]
     assert result["is_error"] is True
@@ -271,21 +325,46 @@ def test_stops_after_too_many_calls(session):
     assert len(claude.requests) == MAX_LLM_CALLS
 
 
-# A refusal, a cut-off answer or an empty answer raises ReplyError, so a partial
-# reply is never sent to the customer.
+# A refusal or a cut-off answer raises ReplyError, so a partial reply is never sent
+# to the customer.
 @pytest.mark.parametrize(
-    ("content", "stop_reason", "error"),
+    ("content", "stop_reason"),
     [
-        ([], "refusal", "refusal"),
-        ([text_block("You paid")], "max_tokens", "max_tokens"),
-        ([], "end_turn", "end_turn"),
+        ([], "refusal"),
+        ([text_block('{"reply": "You paid')], "max_tokens"),
     ],
-    ids=["refusal", "cut_off", "empty"],
+    ids=["refusal", "cut_off"],
 )
-def test_unusable_answer_raises_reply_error(session, content, stop_reason, error):
+def test_unusable_answer_raises_reply_error(session, content, stop_reason):
     claude = FakeClaude(message_response(content, stop_reason))
 
-    with pytest.raises(ReplyError, match=error):
+    with pytest.raises(ReplyError, match=stop_reason):
+        claude.reply(session)
+
+
+# A finished answer that doesn't match the schema raises ReplyError instead of an
+# unhandled validation error: empty or non-JSON text, missing parts, or bad values.
+@pytest.mark.parametrize(
+    "content",
+    [
+        [],
+        [text_block("You paid $49.00.")],
+        [text_block(json.dumps({"reply": "You paid $49.00."}))],
+        [text_block(json.dumps({"analysis": ANALYSIS}))],
+        [
+            text_block(
+                json.dumps(
+                    {"reply": "Hi", "analysis": {**ANALYSIS, "category": "other"}}
+                )
+            )
+        ],
+    ],
+    ids=["empty", "not_json", "missing_analysis", "missing_reply", "bad_category"],
+)
+def test_invalid_output_raises_reply_error(session, content):
+    claude = FakeClaude(message_response(content))
+
+    with pytest.raises(ReplyError, match="invalid reply"):
         claude.reply(session)
 
 
