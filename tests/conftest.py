@@ -8,7 +8,9 @@ from app.main import app
 class FakeLLMService:
     def __init__(self):
         self.questions = []
+        self.reply_calls = []
         self.error = None
+        self.reply = "You were charged $49.00 on November 1."
         self.analysis = QuestionAnalysis(
             category=QuestionCategory.billing,
             priority=TicketPriority.high,
@@ -22,6 +24,12 @@ class FakeLLMService:
         if self.error:
             raise self.error
         return self.analysis
+
+    async def generate_reply(self, message: str, session, customer_id: str) -> str:
+        self.reply_calls.append((message, customer_id))
+        if self.error:
+            raise self.error
+        return self.reply
 
 
 @pytest.fixture

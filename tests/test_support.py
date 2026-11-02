@@ -1,18 +1,65 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.ai import AnalysisError, QuestionCategory
+from app.ai import AnalysisError, QuestionCategory, ReplyError
 from app.auth import get_current_customer
+from app.db.database import get_session
 from app.db.models import Customer, TicketPriority
 from app.main import app
 
 URL = "/v1/support/analyze"
+MESSAGES_URL = "/v1/support/messages"
 
 
 @pytest.fixture
 def client(fake_llm):
     app.dependency_overrides[get_current_customer] = lambda: Customer(id="cust_001")
+    app.dependency_overrides[get_session] = lambda: None
     return TestClient(app)
+
+
+# A valid message returns 200 with the LLM service's reply.
+def test_messages_returns_the_reply(client):
+    response = client.post(MESSAGES_URL, json={"question": "What did I pay?"})
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "You were charged $49.00 on November 1."}
+
+
+# The route gives the LLM service the authenticated customer's ID, which is what
+# limits the tools to that customer's data.
+def test_messages_uses_the_authenticated_customer(client, fake_llm):
+    client.post(MESSAGES_URL, json={"question": "What did I pay?"})
+
+    assert fake_llm.reply_calls == [("What did I pay?", "cust_001")]
+
+
+# A customer ID in the request body is ignored, so nobody can ask about another
+# customer by sending their ID.
+def test_messages_ignores_a_customer_id_in_the_body(client, fake_llm):
+    client.post(
+        MESSAGES_URL, json={"question": "What did I pay?", "customer_id": "cust_008"}
+    )
+
+    assert fake_llm.reply_calls == [("What did I pay?", "cust_001")]
+
+
+# When the LLM service fails, the route returns a 502 with the error message.
+def test_messages_reply_error_returns_502(client, fake_llm):
+    fake_llm.error = ReplyError("The Claude API request failed")
+
+    response = client.post(MESSAGES_URL, json={"question": "What did I pay?"})
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "The Claude API request failed"}
+
+
+# An invalid body is rejected before the LLM service is called.
+def test_messages_invalid_body_returns_422(client, fake_llm):
+    response = client.post(MESSAGES_URL, json={})
+
+    assert response.status_code == 422
+    assert fake_llm.reply_calls == []
 
 
 # A valid request returns 200 with exactly the five fields in the API response.

@@ -1,5 +1,6 @@
 from datetime import date, datetime
 
+from anthropic.types import ToolParam
 from pydantic import BaseModel, ConfigDict
 from pydantic_core import to_json
 from sqlmodel import Session, col, select
@@ -143,9 +144,13 @@ TOOLS = {
     "get_support_tickets": get_support_tickets,
 }
 
-NO_INPUT_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+NO_INPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
 
-TOOL_DEFINITIONS = [
+TOOL_DEFINITIONS: list[ToolParam] = [
     {
         "name": "get_customer",
         "description": (
