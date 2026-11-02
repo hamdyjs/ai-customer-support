@@ -51,13 +51,13 @@ The API runs at http://127.0.0.1:8000, with interactive docs at http://127.0.0.1
 
 Every `/v1` endpoint needs an `Authorization: Bearer <customer_id>` header. This is deliberately simple mock authentication for a demo, so see [Known limitations](#known-limitations).
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /v1/support/messages` | Ask a question using the customer's data, in a new or existing conversation |
-| `GET /v1/support/conversations` | List the customer's conversations |
-| `GET /v1/support/conversations/{id}` | Get one conversation's questions, replies and analysis |
-| `POST /v1/support/analyze` | Classify a question without using any customer data |
-| `GET /health` | Health check, with no authentication needed |
+| Endpoint                             | Purpose                                                                     |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `POST /v1/support/messages`          | Ask a question using the customer's data, in a new or existing conversation |
+| `GET /v1/support/conversations`      | List the customer's conversations                                           |
+| `GET /v1/support/conversations/{id}` | Get one conversation's questions, replies and analysis                      |
+| `POST /v1/support/analyze`           | Classify a question without using any customer data                         |
+| `GET /health`                        | Health check, with no authentication needed                                 |
 
 ### Start a conversation
 
@@ -120,28 +120,28 @@ curl -X POST http://127.0.0.1:8000/v1/support/analyze \
 
 ### Error responses
 
-| Status | Meaning | What to do |
-|---|---|---|
-| `401` | The header is missing, or the customer doesn't exist | Send `Bearer <customer_id>` with a seeded ID |
-| `404` | The conversation doesn't exist or belongs to another customer | Check the ID |
-| `422` | The request is invalid, such as an empty question or one over 4,000 characters | Fix the request |
-| `502` | Claude's response was unusable, or the API rejected the request, such as a bad key | Check the server logs |
-| `503` | Claude is temporarily unavailable, or `ANTHROPIC_API_KEY` isn't set | Follow the error message, and retry after `Retry-After` if it's present |
+| Status | Meaning                                                                            | What to do                                                              |
+| ------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `401`  | The header is missing, or the customer doesn't exist                               | Send `Bearer <customer_id>` with a seeded ID                            |
+| `404`  | The conversation doesn't exist or belongs to another customer                      | Check the ID                                                            |
+| `422`  | The request is invalid, such as an empty question or one over 4,000 characters     | Fix the request                                                         |
+| `502`  | Claude's response was unusable, or the API rejected the request, such as a bad key | Check the server logs                                                   |
+| `503`  | Claude is temporarily unavailable, or `ANTHROPIC_API_KEY` isn't set                | Follow the error message, and retry after `Retry-After` if it's present |
 
 ## Demo scenarios
 
 The seed script creates eight customers, each with a different situation to try:
 
-| Customer | Situation | Try asking |
-|---|---|---|
-| `cust_001` | Healthy account | "What plan am I on and when does it renew?" |
-| `cust_002` | Two successful payments on one invoice | "Was I charged twice this month?" |
-| `cust_003` | A failed payment, then a successful retry | "Was I charged twice in October?" |
-| `cust_004` | Recently upgraded from Starter to Pro | "Why was I charged more recently?" |
-| `cust_005` | Cancelled, but access continues until the period ends | "I cancelled. When do I lose access?" |
-| `cust_006` | An overdue invoice | "Do I have any unpaid invoices?" |
-| `cust_007` | Open and in-progress tickets | "What's the status of my support tickets?" |
-| `cust_008` | Same name as `cust_001`, different account | "What plan is Alex Morgan at Acme Studio on?" |
+| Customer   | Situation                                             | Try asking                                    |
+| ---------- | ----------------------------------------------------- | --------------------------------------------- |
+| `cust_001` | Healthy account                                       | "What plan am I on and when does it renew?"   |
+| `cust_002` | Two successful payments on one invoice                | "Was I charged twice this month?"             |
+| `cust_003` | A failed payment, then a successful retry             | "Was I charged twice in October?"             |
+| `cust_004` | Recently upgraded from Starter to Pro                 | "Why was I charged more recently?"            |
+| `cust_005` | Cancelled, but access continues until the period ends | "I cancelled. When do I lose access?"         |
+| `cust_006` | An overdue invoice                                    | "Do I have any unpaid invoices?"              |
+| `cust_007` | Open and in-progress tickets                          | "What's the status of my support tickets?"    |
+| `cust_008` | Same name as `cust_001`, different account            | "What plan is Alex Morgan at Acme Studio on?" |
 
 `cust_002` and `cust_003` make a useful pair, because both can ask about being charged twice but need opposite answers. The seeded dates are fixed around early November 2026.
 
@@ -202,10 +202,10 @@ This uses your API key and costs about a cent. It runs on a temporary database, 
 
 ## Configuration
 
-| Setting | Required | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | For the AI endpoints | Your Claude API key, set in `.env` |
-| `DATABASE_URL` | No | Uses a different database, set in your shell rather than `.env`. Defaults to `app.db` in the project folder |
+| Setting             | Required             | Purpose                                                                                                     |
+| ------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | For the AI endpoints | Your Claude API key, set in `.env`                                                                          |
+| `DATABASE_URL`      | No                   | Uses a different database, set in your shell rather than `.env`. Defaults to `app.db` in the project folder |
 
 ## Project layout
 
