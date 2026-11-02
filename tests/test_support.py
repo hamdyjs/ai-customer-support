@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from app.ai import AnalysisError, QuestionCategory, ReplyError
 from app.auth import get_current_customer
@@ -22,19 +23,28 @@ CUSTOMER = Customer(
 
 
 @pytest.fixture
-def client(fake_llm):
+def client(fake_llm, engine):
+    def get_test_session():
+        with Session(engine) as session:
+            yield session
+
+    with Session(engine) as session:
+        session.add(Customer(**CUSTOMER.model_dump()))
+        session.commit()
     app.dependency_overrides[get_current_customer] = lambda: CUSTOMER
-    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_session] = get_test_session
     return TestClient(app)
 
 
-# A valid message returns 200 with the reply for the customer and the analysis,
-# using exactly these fields.
+# A valid message returns 200 with the conversation ID, the reply for the customer
+# and the analysis, using exactly these fields.
 def test_messages_returns_the_reply_and_analysis(client):
     response = client.post(MESSAGES_URL, json={"question": "What did I pay?"})
 
+    body = response.json()
     assert response.status_code == 200
-    assert response.json() == {
+    assert body.pop("conversation_id").startswith("conv_")
+    assert body == {
         "reply": "You were charged $49.00 on November 1.",
         "analysis": {
             "category": "billing",
@@ -46,13 +56,13 @@ def test_messages_returns_the_reply_and_analysis(client):
     }
 
 
-# The route declares SupportReply as its response model, so FastAPI validates the
+# The route declares MessageResponse as its response model, so FastAPI validates the
 # response and documents its shape.
 def test_messages_declares_the_response_model(client):
     operation = client.get("/openapi.json").json()["paths"][MESSAGES_URL]["post"]
     schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
 
-    assert schema == {"$ref": "#/components/schemas/SupportReply"}
+    assert schema == {"$ref": "#/components/schemas/MessageResponse"}
 
 
 # The route gives the LLM service the authenticated customer's ID, which is what

@@ -1,80 +1,22 @@
-import asyncio
 import json
 from datetime import date
 
 import httpx2
 import pytest
-from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.ai import MAX_LLM_CALLS, MODEL, LLMService, ReplyError, SupportReply
+from app.ai import MAX_LLM_CALLS, ReplyError, SupportReply
 from app.db.models import AccountStatus, Customer, Invoice, InvoiceStatus
 from app.tools import TOOL_DEFINITIONS
-
-ANALYSIS = {
-    "category": "billing",
-    "priority": "low",
-    "summary": "The customer asked what they paid.",
-    "suggested_response": "You paid $49.00.",
-    "human_review_recommended": False,
-}
-
-
-def text_block(text):
-    return {"type": "text", "text": text}
-
-
-def tool_call(name, tool_id="toolu_1", tool_input=None):
-    return {"type": "tool_use", "id": tool_id, "name": name, "input": tool_input or {}}
-
-
-def message_response(content, stop_reason="end_turn"):
-    return httpx2.Response(
-        200,
-        json={
-            "id": "msg_test",
-            "type": "message",
-            "role": "assistant",
-            "model": MODEL,
-            "content": content,
-            "stop_reason": stop_reason,
-            "stop_sequence": None,
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-        },
-    )
-
-
-def tool_response(*calls):
-    return message_response(list(calls), stop_reason="tool_use")
-
-
-def reply_response(reply="You paid $49.00."):
-    body = {"reply": reply, "analysis": ANALYSIS}
-    return message_response([text_block(json.dumps(body))])
-
-
-class FakeClaude:
-    def __init__(self, *responses):
-        self.responses = list(responses)
-        self.requests = []
-
-    def __call__(self, request):
-        self.requests.append(json.loads(request.content))
-        response = self.responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return response
-
-    def reply(self, session, customer_id="cust_001"):
-        client = AsyncAnthropic(
-            api_key="test-key",
-            max_retries=0,
-            http_client=DefaultAsyncHttpxClient(transport=httpx2.MockTransport(self)),
-        )
-        service = LLMService(client)
-        return asyncio.run(
-            service.generate_reply("What did I pay?", session, customer_id)
-        )
+from tests.fake_claude import (
+    ANALYSIS,
+    FakeClaude,
+    message_response,
+    reply_response,
+    text_block,
+    tool_call,
+    tool_response,
+)
 
 
 @pytest.fixture
@@ -112,6 +54,63 @@ def session():
             )
         session.commit()
         yield session
+
+
+# Earlier messages are sent to Claude before the new one, so it has the context for
+# a follow-up question.
+def test_sends_history_before_the_new_message(session):
+    history = [
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": [text_block("Hello!")]},
+    ]
+    claude = FakeClaude(reply_response())
+
+    claude.generate(session, history=history)
+
+    assert claude.requests[0]["messages"] == [
+        *history,
+        {"role": "user", "content": "What did I pay?"},
+    ]
+
+
+# The messages to store contain the whole turn in order: the question, the tool
+# call, its result and the final answer.
+def test_returns_the_full_turn_for_storage(session):
+    claude = FakeClaude(tool_response(tool_call("get_invoices")), reply_response())
+
+    stored = claude.generate(session).llm_messages
+
+    assert [message["role"] for message in stored] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert stored[0]["content"] == "What did I pay?"
+    assert stored[1]["content"][0]["id"] == "toolu_1"
+    assert stored[2]["content"][0]["tool_use_id"] == "toolu_1"
+    assert json.loads(stored[3]["content"][0]["text"])["reply"] == "You paid $49.00."
+    json.dumps(stored)
+
+
+# Thinking blocks are sent back during the turn but left out of the messages to
+# store, because stored blocks would be rejected once the history changes.
+def test_thinking_is_sent_during_the_turn_but_not_stored(session):
+    thinking = {"type": "thinking", "thinking": "", "signature": "abc"}
+    redacted = {"type": "redacted_thinking", "data": "xyz"}
+    claude = FakeClaude(
+        message_response([thinking, redacted, tool_call("get_invoices")], "tool_use"),
+        message_response(
+            [thinking, text_block(json.dumps({"reply": "Hi", "analysis": ANALYSIS}))]
+        ),
+    )
+
+    stored = claude.generate(session).llm_messages
+
+    assert claude.requests[1]["messages"][1]["content"][0]["type"] == "thinking"
+    assert "thinking" not in json.dumps(stored)
+    assert stored[1]["content"][0]["type"] == "tool_use"
+    assert stored[3]["content"][0]["type"] == "text"
 
 
 # Claude's final JSON answer becomes a validated SupportReply, with the reply and
