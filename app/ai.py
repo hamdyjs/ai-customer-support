@@ -98,7 +98,6 @@ def run_tool_call(
             "content": f"Error: {error}",
             "is_error": True,
         }
-    print(f"  Tool result: {tool_call.name} -> {content}")
     return {"type": "tool_result", "tool_use_id": tool_call.id, "content": content}
 
 

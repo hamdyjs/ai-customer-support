@@ -135,7 +135,7 @@ def test_runs_the_tool_and_sends_the_result_back(session):
 
 
 # Each step of the loop is printed: the customer's message, Claude's tool use and
-# text, the tool's result, and why each call stopped.
+# text, and why each call stopped. Tool results stay out to keep the console short.
 def test_prints_each_step_of_the_loop(session, capsys):
     claude = FakeClaude(
         tool_response(tool_call("get_invoices")),
@@ -148,8 +148,8 @@ def test_prints_each_step_of_the_loop(session, capsys):
     assert "[Message from cust_001] What did I pay?" in output
     assert "[LLM call 1] stop_reason=tool_use" in output
     assert "Tool use: get_invoices input={}" in output
-    assert "Tool result: get_invoices -> " in output
-    assert "inv_1" in output
+    assert "Tool result" not in output
+    assert "inv_1" not in output
     assert "[LLM call 2] stop_reason=end_turn" in output
     assert "Text: You paid $49.00." in output
 
