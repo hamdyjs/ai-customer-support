@@ -1,19 +1,29 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.ai import AnalysisError, QuestionCategory, ReplyError
 from app.auth import get_current_customer
 from app.db.database import get_session
-from app.db.models import Customer, TicketPriority
+from app.db.models import AccountStatus, Customer, TicketPriority
 from app.main import app
 
 URL = "/v1/support/analyze"
 MESSAGES_URL = "/v1/support/messages"
+CUSTOMER = Customer(
+    id="cust_001",
+    name="Alex Morgan",
+    email="alex@example.com",
+    company_name="Acme Studio",
+    account_status=AccountStatus.active,
+    created_at=date(2026, 1, 15),
+)
 
 
 @pytest.fixture
 def client(fake_llm):
-    app.dependency_overrides[get_current_customer] = lambda: Customer(id="cust_001")
+    app.dependency_overrides[get_current_customer] = lambda: CUSTOMER
     app.dependency_overrides[get_session] = lambda: None
     return TestClient(app)
 

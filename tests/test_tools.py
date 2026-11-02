@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
@@ -66,7 +66,7 @@ def add_billing_history(session: Session, customer_id: str, number: int) -> None
             invoice_id=invoice_id,
             amount_cents=4900,
             status=PaymentStatus.succeeded,
-            attempted_at=datetime(2026, 11, 1, 9, 30, tzinfo=timezone.utc),
+            attempted_at=datetime(2026, 11, 1, 9, 30, tzinfo=UTC),
         )
     )
     session.add(
@@ -199,7 +199,7 @@ def test_get_payments_includes_failed_attempts_newest_first(session):
             invoice_id="inv_1",
             amount_cents=4900,
             status=PaymentStatus.failed,
-            attempted_at=datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc),
+            attempted_at=datetime(2026, 11, 1, 9, 0, tzinfo=UTC),
             failure_reason="card_declined",
         )
     )
@@ -264,8 +264,11 @@ def test_tools_return_empty_lists_without_records(session, tool):
 # ID always comes from our code.
 def test_tool_definitions_take_no_input():
     for definition in TOOL_DEFINITIONS:
-        assert definition["input_schema"]["properties"] == {}
-        assert definition["input_schema"]["additionalProperties"] is False
+        assert definition["input_schema"] == {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        }
 
 
 # Every tool Claude is told about has a function behind it, and vice versa.

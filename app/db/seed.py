@@ -1,6 +1,7 @@
 import random
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from collections.abc import Iterator
+from datetime import UTC, date, datetime, timedelta
 from itertools import count
 
 from faker import Faker
@@ -30,7 +31,7 @@ CURRENT_PERIOD_END = date(2026, 12, 1)
 fake = Faker()
 fake.seed_instance(SEED)
 rng = random.Random(SEED)
-counters = defaultdict(lambda: count(1))
+counters: defaultdict[str, Iterator[int]] = defaultdict(lambda: count(1))
 
 STARTER = Plan(
     id="plan_starter",
@@ -76,7 +77,7 @@ def month_starts(start: date, end: date) -> list[date]:
 
 
 def at(day: date, hour: int, minute: int) -> datetime:
-    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=timezone.utc)
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=UTC)
 
 
 def make_customer(
@@ -86,7 +87,7 @@ def make_customer(
     company_name: str | None = None,
     created_at: date | None = None,
 ) -> Customer:
-    if name is None:
+    if name is None or email is None:
         first_name, last_name = fake.first_name(), fake.last_name()
         name = f"{first_name} {last_name}"
         email = f"{first_name}.{last_name}@example.com".lower()
@@ -111,6 +112,8 @@ def make_subscription(
 ) -> Subscription:
     return Subscription(
         id=next_id("sub"),
+        customer_id=customer.id,
+        plan_id=plan.id,
         customer=customer,
         plan=plan,
         status=status,
@@ -134,6 +137,8 @@ def make_invoice(
         period_end = add_months(period_start, 1)
     return Invoice(
         id=next_id("inv"),
+        customer_id=subscription.customer_id,
+        subscription_id=subscription.id,
         customer=subscription.customer,
         subscription=subscription,
         amount_cents=amount_cents,
@@ -154,6 +159,8 @@ def make_payment(
 ) -> Payment:
     return Payment(
         id=next_id("pay"),
+        customer_id=invoice.customer_id,
+        invoice_id=invoice.id,
         customer=invoice.customer,
         invoice=invoice,
         amount_cents=invoice.amount_cents,
@@ -185,6 +192,7 @@ def make_ticket(
 ) -> SupportTicket:
     return SupportTicket(
         id=next_id("ticket"),
+        customer_id=customer.id,
         customer=customer,
         subject=subject,
         description=description,
