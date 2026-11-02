@@ -134,6 +134,39 @@ def test_runs_the_tool_and_sends_the_result_back(session):
     assert json.loads(tool_result["content"])[0]["id"] == "inv_1"
 
 
+# Each step of the loop is printed: the customer's message, Claude's tool use and
+# text, the tool's result, and why each call stopped.
+def test_prints_each_step_of_the_loop(session, capsys):
+    claude = FakeClaude(
+        tool_response(tool_call("get_invoices")),
+        message_response([text_block("You paid $49.00.")]),
+    )
+
+    claude.reply(session)
+
+    output = capsys.readouterr().out
+    assert "[Message from cust_001] What did I pay?" in output
+    assert "[LLM call 1] stop_reason=tool_use" in output
+    assert "Tool use: get_invoices input={}" in output
+    assert "Tool result: get_invoices -> " in output
+    assert "inv_1" in output
+    assert "[LLM call 2] stop_reason=end_turn" in output
+    assert "Text: You paid $49.00." in output
+
+
+# An unknown tool is printed as an error, so it's easy to spot in the output.
+def test_prints_tool_errors(session, capsys):
+    claude = FakeClaude(
+        tool_response(tool_call("get_everything")),
+        message_response([text_block("Sorry.")]),
+    )
+
+    claude.reply(session)
+
+    output = capsys.readouterr().out
+    assert "Tool error: get_everything -> Unknown tool: get_everything" in output
+
+
 # Thinking blocks must be sent back unchanged with the rest of Claude's message,
 # or the API can reject the next request.
 def test_sends_thinking_blocks_back_to_claude(session):

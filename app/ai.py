@@ -91,13 +91,28 @@ def run_tool_call(
     try:
         content = run_tool(tool_call.name, session, customer_id)
     except ValueError as error:
+        print(f"  Tool error: {tool_call.name} -> {error}")
         return {
             "type": "tool_result",
             "tool_use_id": tool_call.id,
             "content": f"Error: {error}",
             "is_error": True,
         }
+    print(f"  Tool result: {tool_call.name} -> {content}")
     return {"type": "tool_result", "tool_use_id": tool_call.id, "content": content}
+
+
+def print_response(call_number: int, response: Message) -> None:
+    print(
+        f"[LLM call {call_number}] stop_reason={response.stop_reason} "
+        f"input_tokens={response.usage.input_tokens} "
+        f"output_tokens={response.usage.output_tokens}"
+    )
+    for block in response.content:
+        if block.type == "text":
+            print(f"  Text: {block.text}")
+        elif block.type == "tool_use":
+            print(f"  Tool use: {block.name} input={block.input}")
 
 
 class LLMService:
@@ -125,8 +140,9 @@ class LLMService:
     async def generate_reply(
         self, message: str, session: Session, customer_id: str
     ) -> str:
+        print(f"\n[Message from {customer_id}] {message}")
         messages: list[MessageParam] = [{"role": "user", "content": message}]
-        for _ in range(MAX_LLM_CALLS):
+        for call_number in range(1, MAX_LLM_CALLS + 1):
             try:
                 response = await self.client.messages.create(
                     model=MODEL,
@@ -139,6 +155,7 @@ class LLMService:
             except APIError as error:
                 raise ReplyError("The Claude API request failed") from error
 
+            print_response(call_number, response)
             if response.stop_reason != "tool_use":
                 return self._read_reply(response)
 
