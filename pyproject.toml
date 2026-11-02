@@ -2,4 +2,8 @@
 name = "ai-customer-support"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "faker>=40.44.0",
+    "fastapi[standard]>=0.162.0",
+    "sqlmodel>=0.0.48",
+]
