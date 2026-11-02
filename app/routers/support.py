@@ -1,12 +1,14 @@
 from datetime import datetime
+from typing import Annotated
 
 from anthropic.types import MessageParam
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlmodel import Session
 
 from app.ai import (
     AnalysisError,
+    LLMError,
     LLMServiceDep,
     QuestionAnalysis,
     ReplyError,
@@ -20,14 +22,21 @@ from app.conversations import (
     load_llm_history,
     save_turn,
 )
-from app.db.database import SessionDep
+from app.db.database import SessionDep, SessionFactoryDep
 from app.db.models import Conversation
+
+MAX_QUESTION_LENGTH = 4000
 
 router = APIRouter(prefix="/support", tags=["support"])
 
 
 class AIRequest(BaseModel):
-    question: str
+    question: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=MAX_QUESTION_LENGTH
+        ),
+    ]
 
 
 class MessageRequest(AIRequest):
@@ -67,19 +76,29 @@ def get_conversation_or_404(
     return conversation
 
 
+def to_http_exception(error: LLMError) -> HTTPException:
+    if error.retry_after is not None:
+        return HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+            headers={"Retry-After": error.retry_after},
+        )
+    return HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(error))
+
+
 @router.post("/analyze")
 async def analyze(request: AIRequest, llm: LLMServiceDep) -> QuestionAnalysis:
     try:
         return await llm.analyze_question(request.question)
     except AnalysisError as error:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+        raise to_http_exception(error) from error
 
 
 @router.post("/messages")
 async def messages(
     request: MessageRequest,
     customer: CurrentCustomerDep,
-    session: SessionDep,
+    new_session: SessionFactoryDep,
     llm: LLMServiceDep,
 ) -> MessageResponse:
     """Send a message, starting a new conversation unless `conversation_id` is set.
@@ -87,26 +106,27 @@ async def messages(
     Claude sees only the conversation's most recent turns, and a failed turn isn't
     saved. The full history stays available from the conversation endpoints.
     """
-    conversation = None
+    customer_id = customer.id
+    conversation_id = request.conversation_id
     history: list[MessageParam] = []
-    if request.conversation_id is not None:
-        conversation = get_conversation_or_404(
-            session, request.conversation_id, customer.id
-        )
-        history = load_llm_history(session, conversation.id)
+    if conversation_id is not None:
+        with new_session() as session:
+            get_conversation_or_404(session, conversation_id, customer_id)
+            history = load_llm_history(session, conversation_id)
 
     try:
         generated = await llm.generate_reply(
-            request.question, history, session, customer.id
+            request.question, history, new_session, customer_id
         )
     except ReplyError as error:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+        raise to_http_exception(error) from error
 
-    conversation_id = save_turn(
-        session, conversation, customer.id, request.question, generated
-    )
+    with new_session() as session:
+        saved_conversation_id = save_turn(
+            session, conversation_id, customer_id, request.question, generated
+        )
     return MessageResponse(
-        conversation_id=conversation_id,
+        conversation_id=saved_conversation_id,
         reply=generated.reply.reply,
         analysis=generated.reply.analysis,
     )

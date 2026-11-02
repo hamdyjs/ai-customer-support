@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.auth import get_current_customer
-from app.db.database import get_session
+from app.db.database import get_session_factory
 from app.db.models import AccountStatus, Customer
 from app.main import app
 
@@ -43,7 +43,9 @@ def session():
 
 @pytest.fixture
 def client(session, fake_llm):
-    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_session_factory] = lambda: (
+        lambda: Session(session.get_bind())
+    )
     return TestClient(app)
 
 
@@ -85,7 +87,7 @@ def test_returns_the_customer_with_that_id(session, customer_id):
         scheme="Bearer", credentials=customer_id
     )
 
-    customer = get_current_customer(session, credentials)
+    customer = get_current_customer(lambda: Session(session.get_bind()), credentials)
 
     assert customer.id == customer_id
 

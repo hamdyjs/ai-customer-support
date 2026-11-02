@@ -39,7 +39,7 @@ class FakeLLMService:
         return self.analysis
 
     async def generate_reply(
-        self, message: str, history, session, customer_id: str
+        self, message: str, history, new_session, customer_id: str
     ) -> GeneratedReply:
         self.reply_calls.append((message, customer_id))
         self.histories.append(history)

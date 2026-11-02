@@ -4,11 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.ai import AnalysisError, QuestionCategory, ReplyError
+from app.ai import AnalysisError, QuestionCategory, ReplyError, get_llm_service
 from app.auth import get_current_customer
-from app.db.database import get_session
+from app.db.database import get_session_factory
 from app.db.models import AccountStatus, Customer, TicketPriority
 from app.main import app
+from app.routers.support import MAX_QUESTION_LENGTH
 
 URL = "/v1/support/analyze"
 MESSAGES_URL = "/v1/support/messages"
@@ -24,16 +25,87 @@ CUSTOMER = Customer(
 
 @pytest.fixture
 def client(fake_llm, engine):
-    def get_test_session():
-        with Session(engine) as session:
-            yield session
-
     with Session(engine) as session:
         session.add(Customer(**CUSTOMER.model_dump()))
         session.commit()
     app.dependency_overrides[get_current_customer] = lambda: CUSTOMER
-    app.dependency_overrides[get_session] = get_test_session
+    app.dependency_overrides[get_session_factory] = lambda: lambda: Session(engine)
     return TestClient(app)
+
+
+# Empty, whitespace-only and oversized questions are rejected on both AI endpoints
+# before the LLM service is called, so they cost nothing and are never stored.
+@pytest.mark.parametrize("url", [URL, MESSAGES_URL], ids=["analyze", "messages"])
+@pytest.mark.parametrize(
+    "question",
+    ["", "   \n\t", "x" * (MAX_QUESTION_LENGTH + 1)],
+    ids=["empty", "whitespace", "too_long"],
+)
+def test_invalid_question_returns_422(client, fake_llm, url, question):
+    response = client.post(url, json={"question": question})
+
+    assert response.status_code == 422
+    assert fake_llm.questions == []
+    assert fake_llm.reply_calls == []
+
+
+# A question at the length limit is accepted, and surrounding whitespace is removed
+# before it reaches the LLM service.
+def test_question_limit_is_inclusive_and_whitespace_is_stripped(client, fake_llm):
+    longest = "x" * MAX_QUESTION_LENGTH
+
+    assert client.post(URL, json={"question": longest}).status_code == 200
+    assert client.post(URL, json={"question": "  Hi  "}).status_code == 200
+    assert fake_llm.questions == [longest, "Hi"]
+
+
+# A temporary Claude failure returns a 503 with Retry-After on both endpoints, so
+# clients know a retry can help.
+@pytest.mark.parametrize(
+    ("url", "error_class"),
+    [(URL, AnalysisError), (MESSAGES_URL, ReplyError)],
+    ids=["analyze", "messages"],
+)
+def test_temporary_failure_returns_503_with_retry_after(
+    client, fake_llm, url, error_class
+):
+    fake_llm.error = error_class("Temporarily unavailable", retry_after="12")
+
+    response = client.post(url, json={"question": "Hi"})
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "12"
+    assert response.json() == {"detail": "Temporarily unavailable"}
+
+
+# A permanent Claude failure returns a 502 without Retry-After on both endpoints.
+@pytest.mark.parametrize(
+    ("url", "error_class"),
+    [(URL, AnalysisError), (MESSAGES_URL, ReplyError)],
+    ids=["analyze", "messages"],
+)
+def test_permanent_failure_returns_502(client, fake_llm, url, error_class):
+    fake_llm.error = error_class("The Claude API request failed")
+
+    response = client.post(url, json={"question": "Hi"})
+
+    assert response.status_code == 502
+    assert "Retry-After" not in response.headers
+
+
+# Without an API key, both endpoints return a clear 503 that says how to fix it,
+# instead of crashing with a 500 when Claude is called.
+@pytest.mark.parametrize("url", [URL, MESSAGES_URL], ids=["analyze", "messages"])
+def test_missing_api_key_returns_a_clear_error(client, monkeypatch, url):
+    app.dependency_overrides.pop(get_llm_service)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    response = client.post(url, json={"question": "Hi"})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "ANTHROPIC_API_KEY isn't set. Add it to your .env file."
+    }
 
 
 # A valid message returns 200 with the conversation ID, the reply for the customer

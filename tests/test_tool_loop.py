@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import date
 
@@ -5,7 +6,12 @@ import httpx2
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.ai import MAX_LLM_CALLS, ReplyError, SupportReply
+from app.ai import (
+    DEFAULT_RETRY_AFTER_SECONDS,
+    MAX_LLM_CALLS,
+    ReplyError,
+    SupportReply,
+)
 from app.db.models import AccountStatus, Customer, Invoice, InvoiceStatus
 from app.tools import TOOL_DEFINITIONS
 from tests.fake_claude import (
@@ -381,7 +387,94 @@ def test_invalid_output_raises_reply_error(session, content):
 def test_api_failure_during_the_loop_raises_reply_error(session, failure):
     claude = FakeClaude(tool_response(tool_call("get_invoices")), failure)
 
-    with pytest.raises(ReplyError, match="API request failed"):
+    with pytest.raises(ReplyError, match="temporarily unavailable"):
         claude.reply(session)
 
     assert len(claude.requests) == 2
+
+
+# A tool_use stop with no tool call raises ReplyError, instead of sending the API an
+# empty message that it would reject.
+def test_tool_use_stop_without_a_tool_call_raises_reply_error(session):
+    claude = FakeClaude(tool_response(text_block("Let me check.")), reply_response())
+
+    with pytest.raises(ReplyError, match="tool_use without a tool call"):
+        claude.reply(session)
+
+    assert len(claude.requests) == 1
+
+
+# The whole loop shares one time limit, so several slow calls can't add up to a very
+# long request.
+def test_request_limit_covers_the_whole_loop(session, monkeypatch):
+    monkeypatch.setattr("app.ai.REQUEST_TIMEOUT_SECONDS", 0.05)
+
+    class SlowClaude(FakeClaude):
+        async def __call__(self, request):
+            await asyncio.sleep(0.03)
+            return super().__call__(request)
+
+    claude = SlowClaude(
+        *[tool_response(tool_call("get_customer")) for _ in range(MAX_LLM_CALLS)]
+    )
+
+    with pytest.raises(ReplyError, match="temporarily unavailable") as error:
+        claude.reply(session)
+
+    assert error.value.retry_after == DEFAULT_RETRY_AFTER_SECONDS
+    assert len(claude.requests) < MAX_LLM_CALLS
+
+
+# Token usage is printed for each call and as a total for the request, but only to
+# the console.
+def test_prints_usage_for_each_call_and_the_request(session, capsys):
+    claude = FakeClaude(tool_response(tool_call("get_customer")), reply_response())
+
+    claude.reply(session)
+
+    output = capsys.readouterr().out
+    assert "[LLM call 1] stop_reason=tool_use input_tokens=1 output_tokens=1" in output
+    assert "[LLM call 2] stop_reason=end_turn input_tokens=1 output_tokens=1" in output
+    assert "[Request total] llm_calls=2 input_tokens=2 output_tokens=2" in output
+    assert "estimated_cost=$0.000001" in output
+
+
+# A failed request still prints what it spent before failing, because those calls
+# were billed.
+def test_failed_request_still_prints_its_usage(session, capsys):
+    claude = FakeClaude(
+        tool_response(tool_call("get_customer")),
+        message_response([], stop_reason="refusal"),
+    )
+
+    with pytest.raises(ReplyError):
+        claude.reply(session)
+
+    assert "[Request total] llm_calls=2" in capsys.readouterr().out
+
+
+# A failure partway through the loop is logged with its status code.
+def test_failure_during_the_loop_is_logged(session, caplog):
+    claude = FakeClaude(
+        tool_response(tool_call("get_customer")),
+        httpx2.Response(
+            401, json={"type": "error", "error": {"type": "x", "message": "m"}}
+        ),
+    )
+
+    with pytest.raises(ReplyError):
+        claude.reply(session)
+
+    assert "Claude API request failed: status=401" in caplog.text
+
+
+# Reaching the call limit is logged, because nothing else would explain the failure.
+def test_too_many_calls_is_logged(session, caplog):
+    claude = FakeClaude(
+        *[tool_response(tool_call("get_customer")) for _ in range(MAX_LLM_CALLS)]
+    )
+
+    with pytest.raises(ReplyError):
+        claude.reply(session)
+
+    assert f"Claude used all {MAX_LLM_CALLS} calls" in caplog.text

@@ -58,16 +58,16 @@ def load_llm_history(session: Session, conversation_id: str) -> list[MessagePara
 
 def save_turn(
     session: Session,
-    conversation: Conversation | None,
+    conversation_id: str | None,
     customer_id: str,
     question: str,
     generated: GeneratedReply,
 ) -> str:
-    if conversation is None:
+    if conversation_id is None:
         conversation = Conversation(customer_id=customer_id)
         session.add(conversation)
         session.flush()
-    conversation_id = conversation.id
+        conversation_id = conversation.id
     session.add(
         ConversationTurn(
             conversation_id=conversation_id,

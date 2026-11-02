@@ -1,13 +1,27 @@
 import asyncio
 import json
+import time
 
 import httpx2
 import pytest
 from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
-from app.ai import MODEL, AnalysisError, LLMService, QuestionAnalysis, QuestionCategory
+from app.ai import (
+    CLAUDE_MAX_RETRIES,
+    CLAUDE_TIMEOUT_SECONDS,
+    DEFAULT_RETRY_AFTER_SECONDS,
+    MODEL,
+    AnalysisError,
+    LLMService,
+    QuestionAnalysis,
+    QuestionCategory,
+    RequestUsage,
+    create_llm_service,
+    get_llm_service,
+)
 from app.db.models import TicketPriority
 
+API_ERROR = {"type": "error", "error": {"type": "api_error", "message": "Failed"}}
 VALID_ANALYSIS = {
     "category": "billing",
     "priority": "high",
@@ -110,20 +124,145 @@ def test_invalid_output_raises_analysis_error(text):
         analyze(lambda request: message_response([text_block(text)]))
 
 
-# Error responses from the Claude API raise AnalysisError: a bad key (401), a
-# rate limit (429) and a server error (500).
-@pytest.mark.parametrize("status_code", [401, 429, 500])
-def test_api_status_error_raises_analysis_error(status_code):
-    error = {"type": "error", "error": {"type": "api_error", "message": "Failed"}}
+# A cut-off answer is reported as cut off, rather than as invalid output.
+def test_cut_off_answer_reports_the_stop_reason():
+    with pytest.raises(AnalysisError, match="No analysis returned: max_tokens"):
+        analyze(
+            lambda request: message_response(
+                [text_block('{"category": "bil')], stop_reason="max_tokens"
+            )
+        )
 
-    with pytest.raises(AnalysisError, match="API request failed"):
-        analyze(lambda request: httpx2.Response(status_code, json=error))
+
+# Errors a retry can't fix, such as a bad key, are permanent: no retry hint.
+@pytest.mark.parametrize("status_code", [400, 401, 403, 404])
+def test_permanent_api_error_has_no_retry_hint(status_code):
+    with pytest.raises(AnalysisError, match="API request failed") as error:
+        analyze(lambda request: httpx2.Response(status_code, json=API_ERROR))
+
+    assert error.value.retry_after is None
 
 
-# Failing to reach the Claude API at all also raises AnalysisError.
-def test_connection_error_raises_analysis_error():
+# Rate limits, server errors and overload are temporary, and carry a retry hint.
+@pytest.mark.parametrize("status_code", [429, 500, 503, 529])
+def test_temporary_api_error_has_a_default_retry_hint(status_code):
+    with pytest.raises(AnalysisError, match="temporarily unavailable") as error:
+        analyze(lambda request: httpx2.Response(status_code, json=API_ERROR))
+
+    assert error.value.retry_after == DEFAULT_RETRY_AFTER_SECONDS
+
+
+# When the API says how long to wait, that value is passed on to the client.
+def test_retry_hint_uses_the_api_retry_after_header():
+    with pytest.raises(AnalysisError) as error:
+        analyze(
+            lambda request: httpx2.Response(
+                429, json=API_ERROR, headers={"retry-after": "12"}
+            )
+        )
+
+    assert error.value.retry_after == "12"
+
+
+# Failing to reach the Claude API, or a single attempt timing out, is temporary.
+@pytest.mark.parametrize(
+    "failure",
+    [httpx2.ConnectError("Network down"), httpx2.ReadTimeout("Too slow")],
+    ids=["network_down", "attempt_timeout"],
+)
+def test_connection_failure_is_temporary(failure):
     def handler(request):
-        raise httpx2.ConnectError("Network down")
+        raise failure
 
-    with pytest.raises(AnalysisError, match="API request failed"):
+    with pytest.raises(AnalysisError, match="temporarily unavailable") as error:
         analyze(handler)
+
+    assert error.value.retry_after == DEFAULT_RETRY_AFTER_SECONDS
+
+
+# The overall request limit stops a slow call even if the attempt timeout hasn't
+# been reached, so one request can't hang for minutes or hours.
+def test_request_limit_stops_a_slow_call(monkeypatch):
+    monkeypatch.setattr("app.ai.REQUEST_TIMEOUT_SECONDS", 0.01)
+
+    async def handler(request):
+        await asyncio.sleep(5)
+
+    started = time.monotonic()
+    with pytest.raises(AnalysisError, match="temporarily unavailable") as error:
+        analyze(handler)
+
+    assert time.monotonic() - started < 2
+    assert error.value.retry_after == DEFAULT_RETRY_AFTER_SECONDS
+
+
+# The real client is created with the short timeout and retry settings, instead of
+# the SDK's 10-minute default.
+def test_client_uses_the_configured_timeout(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    create_llm_service.cache_clear()
+
+    client = get_llm_service().client
+
+    create_llm_service.cache_clear()
+    assert client.timeout == CLAUDE_TIMEOUT_SECONDS
+    assert client.max_retries == CLAUDE_MAX_RETRIES
+
+
+# A rejected API key can be diagnosed from the logs: the status code is recorded,
+# even though clients only see a generic message.
+def test_api_failure_is_logged_with_its_status(caplog):
+    with pytest.raises(AnalysisError):
+        analyze(lambda request: httpx2.Response(401, json=API_ERROR))
+
+    assert "Claude API request failed: status=401" in caplog.text
+
+
+# A refusal is logged with its stop reason and refusal category.
+def test_refusal_is_logged_with_its_category(caplog):
+    def handler(request):
+        response = message_response([], stop_reason="refusal")
+        body = json.loads(response.content)
+        body["stop_details"] = {
+            "type": "refusal",
+            "category": "cyber",
+            "explanation": None,
+        }
+        return httpx2.Response(200, json=body)
+
+    with pytest.raises(AnalysisError):
+        analyze(handler)
+
+    assert "stop_reason=refusal refusal_category=cyber" in caplog.text
+
+
+# Invalid output from Claude is logged, not only returned as a generic error.
+def test_invalid_output_is_logged(caplog):
+    with pytest.raises(AnalysisError):
+        analyze(lambda request: message_response([text_block("Not JSON")]))
+
+    assert "Claude returned an invalid analysis" in caplog.text
+
+
+# /analyze prints its token usage and estimated cost. A million input tokens at
+# $0.10 plus a million output tokens at $0.50 comes to $0.60.
+def test_analyze_prints_usage_and_estimated_cost(capsys):
+    def handler(request):
+        response = message_response([text_block(json.dumps(VALID_ANALYSIS))])
+        body = json.loads(response.content)
+        body["usage"] = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+        return httpx2.Response(200, json=body)
+
+    analyze(handler)
+
+    output = capsys.readouterr().out
+    assert "[LLM call 1] stop_reason=end_turn input_tokens=1000000" in output
+    assert "[Request total] llm_calls=1" in output
+    assert "estimated_cost=$0.600000" in output
+
+
+# Cache reads and writes are included in the estimate at their own prices.
+def test_estimated_cost_includes_cache_tokens():
+    usage = RequestUsage(cache_read_tokens=1_000_000, cache_write_tokens=1_000_000)
+
+    assert usage.estimated_cost() == pytest.approx(0.135)

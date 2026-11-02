@@ -3,6 +3,7 @@ import json
 
 import httpx2
 from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
+from sqlmodel import Session
 
 from app.ai import MODEL, LLMService
 
@@ -71,7 +72,10 @@ class FakeClaude:
     def generate(self, session, customer_id="cust_001", history=None):
         return asyncio.run(
             self.service().generate_reply(
-                "What did I pay?", history or [], session, customer_id
+                "What did I pay?",
+                history or [],
+                lambda: Session(session.get_bind()),
+                customer_id,
             )
         )
 

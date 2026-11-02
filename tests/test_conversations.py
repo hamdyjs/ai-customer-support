@@ -4,12 +4,30 @@ from datetime import date
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlalchemy.exc import OperationalError
+from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.ai import MAX_LLM_CALLS, get_llm_service
+from app.ai import (
+    MAX_LLM_CALLS,
+    REPLY_SYSTEM_PROMPT,
+    GeneratedReply,
+    SupportReply,
+    get_llm_service,
+)
 from app.conversations import MAX_HISTORY_TURNS
-from app.db.database import get_session
-from app.db.models import AccountStatus, Conversation, ConversationTurn, Customer
+from app.db.database import get_session_factory
+from app.db.models import (
+    AccountStatus,
+    BillingCycle,
+    Conversation,
+    ConversationTurn,
+    Customer,
+    Invoice,
+    InvoiceStatus,
+    Plan,
+    Subscription,
+    SubscriptionStatus,
+)
 from app.main import app
 from tests.fake_claude import (
     ANALYSIS,
@@ -70,12 +88,7 @@ def assert_valid_sequence(messages):
             assert [result["tool_use_id"] for result in results] == tool_ids
 
 
-@pytest.fixture
-def client(engine):
-    def get_test_session():
-        with Session(engine) as session:
-            yield session
-
+def add_customers(engine):
     with Session(engine) as session:
         for customer_id, email in [
             (ALEX, "alex@example.com"),
@@ -92,9 +105,186 @@ def client(engine):
                 )
             )
         session.commit()
-    app.dependency_overrides[get_session] = get_test_session
+
+
+@pytest.fixture
+def client(engine):
+    add_customers(engine)
+    app.dependency_overrides[get_session_factory] = lambda: lambda: Session(engine)
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+# A file database uses a real connection pool, so tests can see connections in use.
+@pytest.fixture
+def pooled_engine(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'test.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
+    add_customers(engine)
+    app.dependency_overrides[get_session_factory] = lambda: lambda: Session(engine)
+    yield engine
+    app.dependency_overrides.clear()
+    engine.dispose()
+
+
+class PoolWatchingClaude(FakeClaude):
+    def __init__(self, engine, *responses):
+        super().__init__(*responses)
+        self.engine = engine
+        self.connections_in_use = []
+
+    def __call__(self, request):
+        self.connections_in_use.append(self.engine.pool.checkedout())
+        return super().__call__(request)
+
+
+# No database connection is held while waiting on Claude: not on the first call, and
+# not after tools have used the database between calls.
+def test_no_connection_is_held_during_claude_calls(pooled_engine):
+    client = TestClient(app)
+    claude = PoolWatchingClaude(
+        pooled_engine,
+        tool_response(tool_call("get_customer")),
+        tool_response(tool_call("get_invoices", "toolu_2")),
+        reply_response(),
+    )
+    app.dependency_overrides[get_llm_service] = claude.service
+
+    response = send(client, "Who am I?")
+
+    assert response.status_code == 200
+    assert claude.connections_in_use == [0, 0, 0]
+
+
+# The same holds for a follow-up, which reads the conversation's history first.
+def test_no_connection_is_held_during_a_follow_up(pooled_engine):
+    client = TestClient(app)
+    conversation_id = start_conversation(client)
+    claude = PoolWatchingClaude(pooled_engine, reply_response())
+    app.dependency_overrides[get_llm_service] = claude.service
+
+    response = send(client, "Thanks", conversation_id=conversation_id)
+
+    assert response.status_code == 200
+    assert claude.connections_in_use == [0]
+
+
+# /analyze has no database work of its own, so auth mustn't leave a connection held.
+def test_no_connection_is_held_during_analyze(pooled_engine):
+    client = TestClient(app)
+    claude = PoolWatchingClaude(
+        pooled_engine, message_response([text_block(json.dumps(ANALYSIS))])
+    )
+    app.dependency_overrides[get_llm_service] = claude.service
+
+    response = client.post(
+        "/v1/support/analyze", json={"question": "Hi"}, headers=auth(ALEX)
+    )
+
+    assert response.status_code == 200
+    assert claude.connections_in_use == [0]
+
+
+# If saving fails after Claude has answered, the request fails, nothing partial is
+# stored, and the connection goes back to the pool.
+def test_failed_save_stores_nothing(pooled_engine):
+    class UnsavableReply:
+        async def generate_reply(self, message, history, new_session, customer_id):
+            return GeneratedReply(
+                SupportReply.model_validate(
+                    {"reply": "Paid-for reply", "analysis": ANALYSIS}
+                ),
+                [{"not_json": object()}],
+            )
+
+    app.dependency_overrides[get_llm_service] = UnsavableReply
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = send(client, "Hi")
+
+    assert response.status_code == 500
+    assert count_rows(pooled_engine, Conversation) == 0
+    assert count_rows(pooled_engine, ConversationTurn) == 0
+    assert pooled_engine.pool.checkedout() == 0
+
+
+# A database error inside a tool fails the request without saving a partial turn.
+def test_database_error_in_a_tool_saves_nothing(client, engine, monkeypatch):
+    def fail(*args):
+        raise OperationalError("SELECT", {}, Exception("database is locked"))
+
+    monkeypatch.setattr("app.ai.run_tool", fail)
+    use_claude(tool_response(tool_call("get_customer")), reply_response())
+    failing_client = TestClient(app, raise_server_exceptions=False)
+
+    response = send(failing_client, "Hi")
+
+    assert response.status_code == 500
+    assert count_rows(engine, ConversationTurn) == 0
+
+
+# Stored tool results are a record of the past. If Claude looks data up again in a
+# follow-up, it gets the current value alongside the old one.
+def test_follow_up_can_look_up_current_data(client, engine):
+    with Session(engine) as session:
+        session.add(
+            Plan(
+                id="plan_pro",
+                name="Pro",
+                monthly_price_cents=4900,
+                annual_price_cents=49000,
+                description="Pro plan",
+                features=["Reports"],
+            )
+        )
+        session.add(
+            Subscription(
+                id="sub_1",
+                customer_id=ALEX,
+                plan_id="plan_pro",
+                status=SubscriptionStatus.active,
+                billing_cycle=BillingCycle.monthly,
+                started_at=date(2026, 10, 1),
+                current_period_end=date(2026, 12, 1),
+            )
+        )
+        session.flush()
+        session.add(
+            Invoice(
+                id="inv_1",
+                customer_id=ALEX,
+                subscription_id="sub_1",
+                amount_cents=4900,
+                currency="USD",
+                status=InvoiceStatus.paid,
+                issued_at=date(2026, 11, 1),
+                due_at=date(2026, 11, 8),
+                period_start=date(2026, 11, 1),
+                period_end=date(2026, 12, 1),
+            )
+        )
+        session.commit()
+    use_claude(tool_response(tool_call("get_invoices")), reply_response("It's paid."))
+    conversation_id = send(client, "Is it paid?").json()["conversation_id"]
+    with Session(engine) as session:
+        invoice = session.get(Invoice, "inv_1")
+        assert invoice is not None
+        invoice.status = InvoiceStatus.overdue
+        session.add(invoice)
+        session.commit()
+    claude = use_claude(
+        tool_response(tool_call("get_invoices", "toolu_2")),
+        reply_response("It's overdue."),
+    )
+
+    send(client, "Is it paid now?", conversation_id=conversation_id)
+
+    new_result = claude.requests[1]["messages"][-1]["content"][0]["content"]
+    assert json.loads(new_result)[0]["status"] == "overdue"
+    assert "call the tools\nagain" in REPLY_SYSTEM_PROMPT
 
 
 # A message without an ID creates a conversation, returns its ID, and keeps the
@@ -364,7 +554,7 @@ def test_failed_first_message_saves_nothing(client, engine, responses):
 
     response = send(client, "Hi")
 
-    assert response.status_code == 502
+    assert response.status_code in (502, 503)
     assert count_rows(engine, Conversation) == 0
     assert count_rows(engine, ConversationTurn) == 0
 
@@ -378,7 +568,7 @@ def test_failed_follow_up_saves_nothing_and_can_be_retried(client, engine, respo
 
     response = send(client, "Failed question", conversation_id=conversation_id)
 
-    assert response.status_code == 502
+    assert response.status_code in (502, 503)
     assert count_rows(engine, ConversationTurn) == 1
 
     claude = use_claude(reply_response("Worked"))
