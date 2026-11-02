@@ -113,7 +113,7 @@ class Payment(SQLModel, table=True):
 
 
 class SupportTicket(SQLModel, table=True):
-    __tablename__ = "support_ticket"
+    __tablename__ = "support_ticket"  # type: ignore
 
     id: str = Field(primary_key=True)
     customer_id: str = Field(foreign_key="customer.id", index=True)
