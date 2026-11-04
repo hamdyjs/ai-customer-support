@@ -1,8 +1,9 @@
-"""Load the articles in knowledge_base/, chunk and embed them, and print a sample.
+"""Chunk and embed the articles in knowledge_base/ and save them to a JSON file.
+
+Each run replaces data/knowledge_base.json and prints a sample of the chunks.
 
 This runs on its own and doesn't import or need the FastAPI app. The first run
-downloads the embedding model from Hugging Face, then uses a local cache. Nothing is
-saved yet.
+downloads the embedding model from Hugging Face, then uses a local cache.
 
 Run it from the repo root with:
 
@@ -18,6 +19,9 @@ from pydantic import BaseModel
 from tokenizers import Encoding, Tokenizer
 
 KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge_base"
+KNOWLEDGE_BASE_FILE = (
+    Path(__file__).resolve().parents[1] / "data" / "knowledge_base.json"
+)
 
 TITLE_PATTERN = re.compile(r"#\s+(\S.*?)\s*")
 HEADING_PATTERN = re.compile(r"(#{1,6})\s+(\S.*?)\s*")
@@ -55,7 +59,9 @@ class Document(BaseModel):
 
 
 class Chunk(BaseModel):
+    id: str  # document_id:chunk_index
     document_id: str
+    title: str
     source: str
     section_heading: str | None  # None for text that comes before the first subheading
     chunk_index: int  # position within the document, starting at 0
@@ -67,6 +73,17 @@ class EmbeddedChunk(BaseModel):
     embedding: list[float]
 
 
+class KnowledgeBaseMetadata(BaseModel):
+    embedding_model: str
+    embedding_dimensions: int
+    chunk_count: int
+
+
+class KnowledgeBase(BaseModel):
+    metadata: KnowledgeBaseMetadata
+    chunks: list[EmbeddedChunk]
+
+
 class DocumentLoadError(Exception):
     pass
 
@@ -76,6 +93,10 @@ class DocumentChunkError(Exception):
 
 
 class DocumentEmbeddingError(Exception):
+    pass
+
+
+class DocumentStoreError(Exception):
     pass
 
 
@@ -261,7 +282,9 @@ def chunk_documents(documents: list[Document]) -> list[Chunk]:
             for text in pack_pieces(split_to_fit(body, limit), limit):
                 chunks.append(
                     Chunk(
+                        id=f"{document.id}:{chunk_index}",
                         document_id=document.id,
+                        title=document.title,
                         source=document.source,
                         section_heading=heading,
                         chunk_index=chunk_index,
@@ -315,12 +338,49 @@ def generate_embeddings(chunks: list[Chunk]) -> list[EmbeddedChunk]:
     return embedded_chunks
 
 
-def main(directory: Path = KNOWLEDGE_BASE_DIR) -> int:
+def save_knowledge_base(
+    embedded_chunks: list[EmbeddedChunk], path: Path = KNOWLEDGE_BASE_FILE
+) -> None:
+    """Replace the file at path with the given chunks and the embedding metadata."""
+    knowledge_base = KnowledgeBase(
+        metadata=KnowledgeBaseMetadata(
+            embedding_model=EMBEDDING_MODEL,
+            embedding_dimensions=EMBEDDING_DIMENSIONS,
+            chunk_count=len(embedded_chunks),
+        ),
+        chunks=embedded_chunks,
+    )
+
+    # Writing beside the target and then swapping means a failure can't leave a
+    # half-written file or lose the previous one.
+    temporary_path = path.with_name(f"{path.name}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            temporary_path.write_text(
+                knowledge_base.model_dump_json(indent=2), encoding="utf-8"
+            )
+            temporary_path.replace(path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+    except OSError as error:
+        raise DocumentStoreError(f"Cannot save {path}: {error}") from error
+
+
+def main(
+    directory: Path = KNOWLEDGE_BASE_DIR, output_path: Path = KNOWLEDGE_BASE_FILE
+) -> int:
     try:
         documents = load_documents(directory)
         chunks = chunk_documents(documents)
         embedded_chunks = generate_embeddings(chunks)
-    except (DocumentLoadError, DocumentChunkError, DocumentEmbeddingError) as error:
+        save_knowledge_base(embedded_chunks, output_path)
+    except (
+        DocumentLoadError,
+        DocumentChunkError,
+        DocumentEmbeddingError,
+        DocumentStoreError,
+    ) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
 
@@ -332,6 +392,7 @@ def main(directory: Path = KNOWLEDGE_BASE_DIR) -> int:
             f"--- {count_tokens(text)} tokens, "
             f"{len(embedded.embedding)} dimensions ---\n{text}\n"
         )
+    print(f"Saved {len(embedded_chunks)} chunks to {output_path}")
     return 0
 
 

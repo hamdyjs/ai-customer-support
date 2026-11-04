@@ -1,4 +1,5 @@
 import itertools
+import json
 import sys
 import types
 
@@ -8,6 +9,7 @@ import pytest
 from scripts import ingest
 from scripts.ingest import (
     EMBEDDING_DIMENSIONS,
+    EMBEDDING_MODEL,
     MAX_CHUNK_TOKENS,
     OVERLAP_TOKENS,
     SAMPLE_CHUNKS,
@@ -16,13 +18,16 @@ from scripts.ingest import (
     DocumentChunkError,
     DocumentEmbeddingError,
     DocumentLoadError,
+    DocumentStoreError,
     EmbeddedChunk,
+    KnowledgeBase,
     chunk_documents,
     count_tokens,
     generate_embeddings,
     get_embedding_model,
     load_documents,
     main,
+    save_knowledge_base,
 )
 
 
@@ -183,7 +188,7 @@ def test_missing_title_raises_clear_error(tmp_path, content):
 def test_main_prints_chunks(tmp_path, capsys, fake_model):
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
 
-    assert main(tmp_path) == 0
+    assert main(tmp_path, tmp_path / "output.json") == 0
 
     output = capsys.readouterr().out
     assert "Article\n\nSome text." in output
@@ -199,7 +204,7 @@ def test_main_prints_an_even_sample(tmp_path, capsys, fake_model):
             f"# Article {number:03}\n\nText.\n", encoding="utf-8"
         )
 
-    assert main(tmp_path) == 0
+    assert main(tmp_path, tmp_path / "output.json") == 0
 
     output = capsys.readouterr().out
     assert output.count("--- ") == SAMPLE_CHUNKS
@@ -255,21 +260,27 @@ def test_chunks_normal_sections():
 
     assert [chunk.model_dump() for chunk in chunks] == [
         {
+            "id": "article:0",
             "document_id": "article",
+            "title": "Article",
             "source": "article.md",
             "section_heading": None,
             "chunk_index": 0,
             "text": "Article\n\nIntro text.",
         },
         {
+            "id": "article:1",
             "document_id": "article",
+            "title": "Article",
             "source": "article.md",
             "section_heading": "Billing",
             "chunk_index": 1,
             "text": "Article\nBilling\n\nBilling text.",
         },
         {
+            "id": "article:2",
             "document_id": "article",
+            "title": "Article",
             "source": "article.md",
             "section_heading": "Access",
             "chunk_index": 2,
@@ -349,6 +360,18 @@ def test_handles_crlf_headings():
 
     assert chunks[0].section_heading == "Billing"
     assert body_of(chunks[0]) == "Text."
+
+
+# IDs combine the document and chunk position, so they stay unique across documents.
+def test_chunk_ids_combine_document_and_position():
+    documents = [
+        make_document("# B\n## One\nText.\n## Two\nText.\n", id="b", title="B"),
+        make_document("# A\n## One\nText.\n", id="a", title="A"),
+    ]
+
+    chunks = chunk_documents(documents)
+
+    assert [chunk.id for chunk in chunks] == ["b:0", "b:1", "a:0"]
 
 
 # Documents stay in order, and the chunk position restarts for each one.
@@ -532,7 +555,9 @@ def test_oversized_heading_context_raises_clear_error():
 
 def make_chunk(text, chunk_index=0):
     return Chunk(
+        id=f"article:{chunk_index}",
         document_id="article",
+        title="Article",
         source="article.md",
         section_heading="Billing",
         chunk_index=chunk_index,
@@ -628,3 +653,124 @@ def test_model_load_failure_raises_clear_error(monkeypatch):
 
     with pytest.raises(DocumentEmbeddingError, match="Cannot load.*no internet"):
         get_embedding_model()
+
+
+def make_embedded_chunks(count=2):
+    return [
+        EmbeddedChunk(
+            chunk=make_chunk(f"Text {index}", chunk_index=index),
+            embedding=[index + 0.1] * EMBEDDING_DIMENSIONS,
+        )
+        for index in range(count)
+    ]
+
+
+# The file records which model made the vectors and reads back exactly as saved.
+def test_saved_file_has_metadata_and_reads_back(tmp_path):
+    path = tmp_path / "knowledge_base.json"
+    embedded_chunks = make_embedded_chunks()
+
+    save_knowledge_base(embedded_chunks, path)
+
+    assert json.loads(path.read_text(encoding="utf-8"))["metadata"] == {
+        "embedding_model": EMBEDDING_MODEL,
+        "embedding_dimensions": EMBEDDING_DIMENSIONS,
+        "chunk_count": 2,
+    }
+    saved = KnowledgeBase.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.chunks == embedded_chunks
+
+
+# The data directory doesn't exist on a fresh checkout, so it gets created.
+def test_save_creates_missing_directories(tmp_path):
+    path = tmp_path / "new" / "folder" / "knowledge_base.json"
+
+    save_knowledge_base(make_embedded_chunks(), path)
+
+    assert path.exists()
+
+
+# A new save replaces the old contents entirely, rather than adding to them.
+def test_save_replaces_previous_file(tmp_path):
+    path = tmp_path / "knowledge_base.json"
+    save_knowledge_base(make_embedded_chunks(3), path)
+
+    save_knowledge_base(make_embedded_chunks(1), path)
+
+    saved = KnowledgeBase.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.metadata.chunk_count == 1
+    assert len(saved.chunks) == 1
+
+
+# Only the finished file remains after a successful save.
+def test_save_leaves_no_temporary_file(tmp_path):
+    path = tmp_path / "knowledge_base.json"
+
+    save_knowledge_base(make_embedded_chunks(), path)
+
+    assert list(tmp_path.iterdir()) == [path]
+
+
+# If the final swap fails, the old file survives and the temporary file is removed.
+def test_failed_save_keeps_previous_file(tmp_path, monkeypatch):
+    path = tmp_path / "knowledge_base.json"
+    path.write_text("previous", encoding="utf-8")
+
+    def fail(self, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(type(path), "replace", fail)
+
+    with pytest.raises(DocumentStoreError, match="disk full") as error:
+        save_knowledge_base(make_embedded_chunks(), path)
+
+    assert str(path) in str(error.value)
+    assert path.read_text(encoding="utf-8") == "previous"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+# A directory that can't be created gives the same clear error.
+def test_save_to_impossible_directory_raises_clear_error(tmp_path):
+    blocker = tmp_path / "file.txt"
+    blocker.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(DocumentStoreError, match="Cannot save"):
+        save_knowledge_base(make_embedded_chunks(), blocker / "knowledge_base.json")
+
+
+# The script writes the file and says where it went.
+def test_main_saves_knowledge_base(tmp_path, capsys, fake_model):
+    (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
+    output = tmp_path / "output.json"
+
+    assert main(tmp_path, output) == 0
+
+    saved = KnowledgeBase.model_validate_json(output.read_text(encoding="utf-8"))
+    assert [item.chunk.id for item in saved.chunks] == ["article:0"]
+    assert f"Saved 1 chunks to {output}" in capsys.readouterr().out
+
+
+# A failed run exits before saving, so the last good file stays in place.
+def test_main_keeps_previous_file_when_embedding_fails(tmp_path, monkeypatch):
+    def fail():
+        raise DocumentEmbeddingError("Cannot load the model")
+
+    monkeypatch.setattr(ingest, "get_embedding_model", fail)
+    (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
+    output = tmp_path / "output.json"
+    output.write_text("previous", encoding="utf-8")
+
+    assert main(tmp_path, output) == 1
+
+    assert output.read_text(encoding="utf-8") == "previous"
+
+
+# A storage failure is reported the same way as the script's other failures.
+def test_main_reports_save_errors(tmp_path, capsys, fake_model):
+    (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
+    blocker = tmp_path / "file.txt"
+    blocker.write_text("not a directory", encoding="utf-8")
+
+    assert main(tmp_path, blocker / "output.json") == 1
+
+    assert "Cannot save" in capsys.readouterr().err
