@@ -1,7 +1,8 @@
-"""Load the Markdown articles in knowledge_base/, chunk them and print a sample.
+"""Load the articles in knowledge_base/, chunk and embed them, and print a sample.
 
 This runs on its own and doesn't import or need the FastAPI app. The first run
-downloads the embedding model's tokenizer from Hugging Face, then uses a local cache.
+downloads the embedding model from Hugging Face, then uses a local cache. Nothing is
+saved yet.
 
 Run it from the repo root with:
 
@@ -28,6 +29,7 @@ FENCE_MARKERS = ("```", "~~~")
 WHITESPACE = re.compile(r"\s+")
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_DIMENSIONS = 384
 # The model accepts 256 tokens. This limit includes heading context and the [CLS] and
 # [SEP] tokens the model adds to every input.
 MAX_CHUNK_TOKENS = 200
@@ -60,11 +62,20 @@ class Chunk(BaseModel):
     text: str  # what gets embedded: heading context followed by the chunk's content
 
 
+class EmbeddedChunk(BaseModel):
+    chunk: Chunk
+    embedding: list[float]
+
+
 class DocumentLoadError(Exception):
     pass
 
 
 class DocumentChunkError(Exception):
+    pass
+
+
+class DocumentEmbeddingError(Exception):
     pass
 
 
@@ -262,18 +273,65 @@ def chunk_documents(documents: list[Document]) -> list[Chunk]:
     return chunks
 
 
+@lru_cache(maxsize=1)
+def get_embedding_model():
+    try:
+        # Imported here because it loads PyTorch, which is slow and isn't needed when
+        # there's nothing to embed.
+        from sentence_transformers import SentenceTransformer
+
+        return SentenceTransformer(EMBEDDING_MODEL)
+    except Exception as error:
+        raise DocumentEmbeddingError(
+            f"Cannot load the {EMBEDDING_MODEL} model: {error}"
+        ) from error
+
+
+def generate_embeddings(chunks: list[Chunk]) -> list[EmbeddedChunk]:
+    """Embed each chunk's text and pair it with its vector, skipping blank chunks."""
+    chunks = [chunk for chunk in chunks if chunk.text.strip()]
+    if not chunks:
+        return []
+
+    vectors = get_embedding_model().encode(
+        [chunk.text for chunk in chunks], show_progress_bar=False
+    )
+
+    # Pairing only by position, so a wrong count would attach vectors to the wrong chunks.
+    if len(vectors) != len(chunks):
+        raise DocumentEmbeddingError(
+            f"Expected {len(chunks)} embeddings, but the model returned {len(vectors)}"
+        )
+
+    embedded_chunks = []
+    for chunk, vector in zip(chunks, vectors):
+        if len(vector) != EMBEDDING_DIMENSIONS:
+            raise DocumentEmbeddingError(
+                f"Expected {EMBEDDING_DIMENSIONS} dimensions for chunk "
+                f"{chunk.chunk_index} of {chunk.source}, but got {len(vector)}"
+            )
+        embedded_chunks.append(EmbeddedChunk(chunk=chunk, embedding=vector.tolist()))
+
+    return embedded_chunks
+
+
 def main(directory: Path = KNOWLEDGE_BASE_DIR) -> int:
     try:
         documents = load_documents(directory)
         chunks = chunk_documents(documents)
-    except (DocumentLoadError, DocumentChunkError) as error:
+        embedded_chunks = generate_embeddings(chunks)
+    except (DocumentLoadError, DocumentChunkError, DocumentEmbeddingError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
 
     # An even spread across the articles, so the sample isn't all from the first one.
-    step = max(1, len(chunks) // SAMPLE_CHUNKS)
-    for chunk in chunks[::step][:SAMPLE_CHUNKS]:
-        print(f"--- {count_tokens(chunk.text)} tokens ---\n{chunk.text}\n")
+    step = max(1, len(embedded_chunks) // SAMPLE_CHUNKS)
+    for embedded in embedded_chunks[::step][:SAMPLE_CHUNKS]:
+        text = embedded.chunk.text
+        print(
+            f"--- {count_tokens(text)} tokens, "
+            f"{len(embedded.embedding)} dimensions ---\n{text}\n"
+        )
     return 0
 
 

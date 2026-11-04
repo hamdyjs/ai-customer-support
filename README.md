@@ -13,7 +13,7 @@ The data belongs to **Flowdesk**, a fictional project management product. All cu
 
 ## Tech stack
 
-Python 3.13, FastAPI, Pydantic, SQLModel, SQLite, the Anthropic Python SDK with Claude Haiku 5.5, pytest, and uv.
+Python 3.13, FastAPI, Pydantic, SQLModel, SQLite, the Anthropic Python SDK with Claude Haiku 5.5, sentence-transformers, pytest, and uv.
 
 ## Setup
 
@@ -192,7 +192,7 @@ uv run pytest
 
 The tests need no API key and make no real API calls. They use temporary databases, a fake LLM service to test the routes, and a fake HTTP layer to test the real service and SDK together.
 
-The chunking tests use the real `all-MiniLM-L6-v2` tokenizer so their token counts match the embedding model. The first run downloads it from Hugging Face, which needs internet access, and later runs use a local cache.
+The chunking tests use the real `all-MiniLM-L6-v2` tokenizer so their token counts match the embedding model. The first run downloads it from Hugging Face, which needs internet access, and later runs use a local cache. The embedding tests use a fake model, so they don't download or load the real one.
 
 To check the demo scenarios against real Claude, run:
 
@@ -200,13 +200,13 @@ To check the demo scenarios against real Claude, run:
 uv run python -m scripts.check_real_api
 ```
 
-To check that the Markdown articles in `knowledge_base/` load and chunk correctly, run the following. It doesn't need the server or an API key:
+This uses your API key and costs about a cent. It runs on a temporary database, so `app.db` isn't touched. Claude's wording varies, so it only checks for key facts, and a failure means the reply is worth reading, not necessarily that something is broken.
+
+To check that the Markdown articles in `knowledge_base/` load, chunk and embed correctly, run the following. It doesn't need the server or an API key. The first run downloads the `all-MiniLM-L6-v2` model from Hugging Face, and later runs use a local cache. The embeddings aren't saved yet:
 
 ```bash
 uv run python -m scripts.ingest
 ```
-
-This uses your API key and costs about a cent. It runs on a temporary database, so `app.db` isn't touched. Claude's wording varies, so it only checks for key facts, and a failure means the reply is worth reading, not necessarily that something is broken.
 
 ## Configuration
 

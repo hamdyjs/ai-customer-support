@@ -1,19 +1,58 @@
 import itertools
+import sys
+import types
 
+import numpy as np
 import pytest
 
+from scripts import ingest
 from scripts.ingest import (
+    EMBEDDING_DIMENSIONS,
     MAX_CHUNK_TOKENS,
     OVERLAP_TOKENS,
     SAMPLE_CHUNKS,
+    Chunk,
     Document,
     DocumentChunkError,
+    DocumentEmbeddingError,
     DocumentLoadError,
+    EmbeddedChunk,
     chunk_documents,
     count_tokens,
+    generate_embeddings,
+    get_embedding_model,
     load_documents,
     main,
 )
+
+
+# Stands in for the real model, so these tests don't need PyTorch or a large download.
+# Each vector is filled with its text's position, to show which text it belongs to.
+class FakeModel:
+    def __init__(self):
+        self.texts = []
+
+    def encode(self, texts, show_progress_bar=True):
+        self.texts.extend(texts)
+        return np.array(
+            [[float(index)] * EMBEDDING_DIMENSIONS for index in range(len(texts))]
+        )
+
+
+@pytest.fixture
+def fake_model(monkeypatch):
+    model = FakeModel()
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+    return model
+
+
+# Fails the test if anything tries to load the model.
+@pytest.fixture
+def model_must_not_load(monkeypatch):
+    def fail():
+        pytest.fail("The embedding model should not have been loaded")
+
+    monkeypatch.setattr(ingest, "get_embedding_model", fail)
 
 
 # Each field is filled in from the file's name, heading and text.
@@ -141,19 +180,20 @@ def test_missing_title_raises_clear_error(tmp_path, content):
 
 
 # The script prints chunks for review, without the old list of files and titles.
-def test_main_prints_chunks(tmp_path, capsys):
+def test_main_prints_chunks(tmp_path, capsys, fake_model):
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
 
     assert main(tmp_path) == 0
 
     output = capsys.readouterr().out
     assert "Article\n\nSome text." in output
+    assert f"{EMBEDDING_DIMENSIONS} dimensions" in output
     assert "article:" not in output
     assert "Documents loaded" not in output
 
 
 # The sample is capped and spread across all the chunks, not just the first ones.
-def test_main_prints_an_even_sample(tmp_path, capsys):
+def test_main_prints_an_even_sample(tmp_path, capsys, fake_model):
     for number in range(100):
         (tmp_path / f"{number:03}.md").write_text(
             f"# Article {number:03}\n\nText.\n", encoding="utf-8"
@@ -165,6 +205,19 @@ def test_main_prints_an_even_sample(tmp_path, capsys):
     assert output.count("--- ") == SAMPLE_CHUNKS
     assert "Article 000" in output
     assert "Article 090" in output
+
+
+# An embedding failure is reported the same way as a loading failure.
+def test_main_reports_embedding_errors(tmp_path, capsys, monkeypatch):
+    def fail():
+        raise DocumentEmbeddingError("Cannot load the model")
+
+    monkeypatch.setattr(ingest, "get_embedding_model", fail)
+    (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
+
+    assert main(tmp_path) == 1
+
+    assert "Cannot load the model" in capsys.readouterr().err
 
 
 # On failure the script prints the error to stderr and exits with status 1.
@@ -475,3 +528,103 @@ def test_oversized_heading_context_raises_clear_error():
 
     with pytest.raises(DocumentChunkError, match="article.md"):
         chunk_documents([make_document("Some text.", title=title)])
+
+
+def make_chunk(text, chunk_index=0):
+    return Chunk(
+        document_id="article",
+        source="article.md",
+        section_heading="Billing",
+        chunk_index=chunk_index,
+        text=text,
+    )
+
+
+# Each chunk stays unchanged and gets its own vector, in the original order.
+def test_pairs_each_chunk_with_its_embedding(fake_model):
+    chunks = [make_chunk(f"Text {index}", chunk_index=index) for index in range(3)]
+
+    embedded = generate_embeddings(chunks)
+
+    assert fake_model.texts == ["Text 0", "Text 1", "Text 2"]
+    assert embedded == [
+        EmbeddedChunk(chunk=chunk, embedding=[float(index)] * EMBEDDING_DIMENSIONS)
+        for index, chunk in enumerate(chunks)
+    ]
+
+
+# Embeddings are plain floats, not NumPy values, so they're ready to store later.
+def test_embeddings_are_plain_floats(fake_model):
+    embedded = generate_embeddings([make_chunk("Text")])
+
+    assert type(embedded[0].embedding[0]) is float
+
+
+# No chunks means nothing to embed, so the slow model load is skipped.
+def test_no_chunks_does_not_load_model(model_must_not_load):
+    assert generate_embeddings([]) == []
+
+
+# Chunks with only whitespace have nothing to embed either.
+def test_all_blank_chunks_do_not_load_model(model_must_not_load):
+    assert generate_embeddings([make_chunk(""), make_chunk("  \n\t")]) == []
+
+
+# Blank chunks are left out, and the others still get the right vectors.
+def test_skips_blank_chunks(fake_model):
+    chunks = [make_chunk("First"), make_chunk("   "), make_chunk("Second")]
+
+    embedded = generate_embeddings(chunks)
+
+    assert fake_model.texts == ["First", "Second"]
+    assert [item.chunk.text for item in embedded] == ["First", "Second"]
+    assert [item.embedding[0] for item in embedded] == [0.0, 1.0]
+
+
+# A model with the wrong output size fails, and the error names the chunk.
+def test_wrong_dimensions_raise_clear_error(monkeypatch):
+    model = types.SimpleNamespace(
+        encode=lambda texts, show_progress_bar: np.zeros((len(texts), 10))
+    )
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+
+    with pytest.raises(DocumentEmbeddingError, match="chunk 4 of article.md.*got 10"):
+        generate_embeddings([make_chunk("Text", chunk_index=4)])
+
+
+# Every vector gets checked, not just the first.
+def test_single_wrong_sized_vector_raises_clear_error(monkeypatch):
+    vectors = [np.zeros(EMBEDDING_DIMENSIONS), np.zeros(EMBEDDING_DIMENSIONS - 1)]
+    model = types.SimpleNamespace(encode=lambda texts, show_progress_bar: vectors)
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+    chunks = [make_chunk("First", chunk_index=0), make_chunk("Second", chunk_index=1)]
+
+    with pytest.raises(DocumentEmbeddingError, match="chunk 1 of article.md"):
+        generate_embeddings(chunks)
+
+
+# Too few vectors would attach them to the wrong chunks, so it's an error.
+def test_wrong_number_of_vectors_raises_clear_error(monkeypatch):
+    model = types.SimpleNamespace(
+        encode=lambda texts, show_progress_bar: np.zeros((1, EMBEDDING_DIMENSIONS))
+    )
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+
+    with pytest.raises(
+        DocumentEmbeddingError, match="Expected 2 embeddings.*returned 1"
+    ):
+        generate_embeddings([make_chunk("First"), make_chunk("Second")])
+
+
+# A model that can't load gives a clear error, such as when offline with no cache.
+# The library is replaced here, so this test doesn't load PyTorch.
+def test_model_load_failure_raises_clear_error(monkeypatch):
+    def fail(name):
+        raise OSError("no internet")
+
+    library = types.SimpleNamespace(SentenceTransformer=fail)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", library)
+    get_embedding_model.cache_clear()
+
+    with pytest.raises(DocumentEmbeddingError, match="Cannot load.*no internet"):
+        get_embedding_model()
