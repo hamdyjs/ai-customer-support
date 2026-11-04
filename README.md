@@ -198,6 +198,12 @@ To check the demo scenarios against real Claude, run:
 uv run python -m scripts.check_real_api
 ```
 
+To check that the Markdown articles in `knowledge_base/` load correctly, run the following. It doesn't need the server or an API key:
+
+```bash
+uv run python -m scripts.ingest
+```
+
 This uses your API key and costs about a cent. It runs on a temporary database, so `app.db` isn't touched. Claude's wording varies, so it only checks for key facts, and a failure means the reply is worth reading, not necessarily that something is broken.
 
 ## Configuration
