@@ -192,13 +192,15 @@ uv run pytest
 
 The tests need no API key and make no real API calls. They use temporary databases, a fake LLM service to test the routes, and a fake HTTP layer to test the real service and SDK together.
 
+The chunking tests use the real `all-MiniLM-L6-v2` tokenizer so their token counts match the embedding model. The first run downloads it from Hugging Face, which needs internet access, and later runs use a local cache.
+
 To check the demo scenarios against real Claude, run:
 
 ```bash
 uv run python -m scripts.check_real_api
 ```
 
-To check that the Markdown articles in `knowledge_base/` load correctly, run the following. It doesn't need the server or an API key:
+To check that the Markdown articles in `knowledge_base/` load and chunk correctly, run the following. It doesn't need the server or an API key:
 
 ```bash
 uv run python -m scripts.ingest
