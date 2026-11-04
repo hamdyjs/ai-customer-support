@@ -641,6 +641,32 @@ def test_wrong_number_of_vectors_raises_clear_error(monkeypatch):
         generate_embeddings([make_chunk("First"), make_chunk("Second")])
 
 
+# A failure while encoding, such as running out of memory, gives a clear error.
+def test_encoding_failure_raises_clear_error(monkeypatch):
+    def fail(texts, show_progress_bar):
+        raise RuntimeError("out of memory")
+
+    model = types.SimpleNamespace(encode=fail)
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+
+    with pytest.raises(DocumentEmbeddingError, match="Cannot generate.*out of memory"):
+        generate_embeddings([make_chunk("Text")])
+
+
+# NaN and infinity have the right length but are unusable, so the chunk is reported.
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_values_raise_clear_error(monkeypatch, value):
+    good = np.zeros(EMBEDDING_DIMENSIONS)
+    bad = np.zeros(EMBEDDING_DIMENSIONS)
+    bad[-1] = value
+    model = types.SimpleNamespace(encode=lambda texts, show_progress_bar: [good, bad])
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+    chunks = [make_chunk("First", chunk_index=0), make_chunk("Second", chunk_index=1)]
+
+    with pytest.raises(DocumentEmbeddingError, match="chunk 1 of article.md"):
+        generate_embeddings(chunks)
+
+
 # A model that can't load gives a clear error, such as when offline with no cache.
 # The library is replaced here, so this test doesn't load PyTorch.
 def test_model_load_failure_raises_clear_error(monkeypatch):
@@ -762,6 +788,41 @@ def test_main_keeps_previous_file_when_embedding_fails(tmp_path, monkeypatch):
 
     assert main(tmp_path, output) == 1
 
+    assert output.read_text(encoding="utf-8") == "previous"
+
+
+# An encoding failure is a clear error, not a traceback, and keeps the last good file.
+def test_main_reports_encoding_failure_and_keeps_file(tmp_path, capsys, monkeypatch):
+    def fail(texts, show_progress_bar):
+        raise RuntimeError("out of memory")
+
+    model = types.SimpleNamespace(encode=fail)
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+    (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
+    output = tmp_path / "output.json"
+    output.write_text("previous", encoding="utf-8")
+
+    assert main(tmp_path, output) == 1
+
+    assert "out of memory" in capsys.readouterr().err
+    assert output.read_text(encoding="utf-8") == "previous"
+
+
+# NaN vectors must not replace a good file with one that can't be read back.
+def test_main_rejects_nan_vectors_and_keeps_file(tmp_path, capsys, monkeypatch):
+    model = types.SimpleNamespace(
+        encode=lambda texts, show_progress_bar: np.full(
+            (len(texts), EMBEDDING_DIMENSIONS), float("nan")
+        )
+    )
+    monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
+    (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
+    output = tmp_path / "output.json"
+    output.write_text("previous", encoding="utf-8")
+
+    assert main(tmp_path, output) == 1
+
+    assert "non-finite" in capsys.readouterr().err
     assert output.read_text(encoding="utf-8") == "previous"
 
 

@@ -10,6 +10,7 @@ Run it from the repo root with:
     uv run python -m scripts.ingest
 """
 
+import math
 import re
 import sys
 from functools import lru_cache
@@ -316,9 +317,15 @@ def generate_embeddings(chunks: list[Chunk]) -> list[EmbeddedChunk]:
     if not chunks:
         return []
 
-    vectors = get_embedding_model().encode(
-        [chunk.text for chunk in chunks], show_progress_bar=False
-    )
+    model = get_embedding_model()
+    try:
+        vectors = model.encode(
+            [chunk.text for chunk in chunks], show_progress_bar=False
+        )
+    except Exception as error:
+        raise DocumentEmbeddingError(
+            f"Cannot generate embeddings with {EMBEDDING_MODEL}: {error}"
+        ) from error
 
     # Pairing only by position, so a wrong count would attach vectors to the wrong chunks.
     if len(vectors) != len(chunks):
@@ -333,7 +340,14 @@ def generate_embeddings(chunks: list[Chunk]) -> list[EmbeddedChunk]:
                 f"Expected {EMBEDDING_DIMENSIONS} dimensions for chunk "
                 f"{chunk.chunk_index} of {chunk.source}, but got {len(vector)}"
             )
-        embedded_chunks.append(EmbeddedChunk(chunk=chunk, embedding=vector.tolist()))
+        embedding = vector.tolist()
+        # NaN would be saved as null, which makes the whole file impossible to read back.
+        if not all(math.isfinite(value) for value in embedding):
+            raise DocumentEmbeddingError(
+                f"Found non-finite values in the embedding for chunk "
+                f"{chunk.chunk_index} of {chunk.source}"
+            )
+        embedded_chunks.append(EmbeddedChunk(chunk=chunk, embedding=embedding))
 
     return embedded_chunks
 
