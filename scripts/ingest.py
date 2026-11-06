@@ -2,9 +2,9 @@
 
 Each run replaces the knowledge_base collection and prints a sample of the chunks.
 
-This runs on its own and doesn't import or need the FastAPI app, but Qdrant must be
-running. The first run downloads the embedding model from Hugging Face, then uses a
-local cache.
+It takes its Qdrant and model settings from app/retrieval.py, which searches what this
+stores, but doesn't need the FastAPI app running. Qdrant must be running. The first run
+downloads the embedding model from Hugging Face, then uses a local cache.
 
 Run it from the repo root with:
 
@@ -12,7 +12,6 @@ Run it from the repo root with:
 """
 
 import math
-import os
 import re
 import sys
 import uuid
@@ -23,10 +22,10 @@ from pydantic import BaseModel
 from qdrant_client import QdrantClient, models
 from tokenizers import Encoding, Tokenizer
 
+from app.retrieval import COLLECTION_NAME, EMBEDDING_MODEL, QDRANT_URL
+
 KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge_base"
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "knowledge_base"
 # Point IDs are made from chunk IDs within this namespace, so a chunk gets the same ID
 # on every run. Any fixed UUID works, as long as it stays the same.
 POINT_ID_NAMESPACE = uuid.UUID("c3830e34-8645-48f4-baa0-d72730938742")
@@ -40,8 +39,7 @@ TABLE_SEPARATOR_PATTERN = re.compile(r"(?=.*-)[\s|:-]*\|[\s|:-]*")
 FENCE_MARKERS = ("```", "~~~")
 WHITESPACE = re.compile(r"\s+")
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_DIMENSIONS = 384
+EMBEDDING_DIMENSIONS = 384  # the output size of EMBEDDING_MODEL
 # The model accepts 256 tokens. This limit includes heading context and the [CLS] and
 # [SEP] tokens the model adds to every input.
 MAX_CHUNK_TOKENS = 200

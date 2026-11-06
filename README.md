@@ -216,13 +216,19 @@ uv run python -m scripts.ingest
 
 You can browse the stored chunks in Qdrant's dashboard at http://localhost:6333/dashboard.
 
+To see what a search finds, pass one or more queries in quotes. Each result shows its cosine similarity score, chunk ID, section heading and a preview of its text. Add `--limit 3` to change how many results each query shows, or `--full` to print each chunk's whole text. Loading the model takes a few seconds, so passing several queries in one run is quicker than running it once per query:
+
+```bash
+uv run python -m scripts.search "I was charged twice" "How do I cancel my subscription?"
+```
+
 ## Configuration
 
-| Setting             | Required             | Purpose                                                                                                           |
-| ------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | For the AI endpoints | Your Claude API key, set in `.env`                                                                                |
-| `DATABASE_URL`      | No                   | Uses a different database, set in your shell rather than `.env`. Defaults to `app.db` in the project folder       |
-| `QDRANT_URL`        | No                   | Where `scripts/ingest.py` finds Qdrant, set in your shell rather than `.env`. Defaults to `http://localhost:6333` |
+| Setting             | Required             | Purpose                                                                                                                    |
+| ------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | For the AI endpoints | Your Claude API key, set in `.env`                                                                                         |
+| `DATABASE_URL`      | No                   | Uses a different database, set in your shell rather than `.env`. Defaults to `app.db` in the project folder                |
+| `QDRANT_URL`        | No                   | Where the help articles are stored and searched, set in your shell rather than `.env`. Defaults to `http://localhost:6333` |
 
 ## Project layout
 
@@ -233,6 +239,7 @@ app/
 ├── ai.py              # Prompts, schemas, the tool loop and error handling
 ├── tools.py           # Read-only tools for Claude
 ├── conversations.py   # Loads and saves conversation turns
+├── retrieval.py       # Searches the help articles in Qdrant
 ├── routers/
 │   └── support.py     # API endpoints and request/response models
 └── db/
@@ -243,7 +250,8 @@ knowledge_base/        # Markdown help articles
 qdrant_storage/        # Qdrant's data from Docker, not committed
 scripts/
 ├── check_real_api.py  # Opt-in check against real Claude
-└── ingest.py          # Chunks, embeds and stores the help articles in Qdrant
+├── ingest.py          # Chunks, embeds and stores the help articles in Qdrant
+└── search.py          # Searches the help articles from the command line
 tests/
 ```
 
