@@ -5,10 +5,15 @@
     "relevant_document_ids": ["invoices"],
     "category": "direct",
     "answer_chunk_ids": ["invoices:1"],
+    "answer_evidence": {
+      "invoices:1": "Select **Download PDF**."
+    },
     "mention_chunk_ids": [
       "invoices:0",
+      "invoices:2",
       "invoices:15",
       "account-settings:13",
+      "support-tickets:5",
       "support-tickets:15",
       "cancellation:8"
     ]
@@ -17,19 +22,44 @@
     "id": "rc-02",
     "question": "How do I set up two-step verification on my account?",
     "relevant_document_ids": ["account-settings"],
-    "category": "direct"
+    "category": "direct",
+    "answer_chunk_ids": ["account-settings:5"],
+    "answer_evidence": {
+      "account-settings:5": "Select **Turn on two-step verification**."
+    },
+    "mention_chunk_ids": ["account-settings:0", "troubleshooting:4"]
   },
   {
     "id": "rc-03",
     "question": "One of my payment attempts failed with processing_error. What does that mean, and what should I do?",
     "relevant_document_ids": ["failed-payments"],
-    "category": "direct"
+    "category": "direct",
+    "answer_chunk_ids": ["failed-payments:2"],
+    "answer_evidence": {
+      "failed-payments:2": "A temporary problem occurred with the payment network"
+    },
+    "mention_chunk_ids": [
+      "failed-payments:0",
+      "failed-payments:1",
+      "failed-payments:5",
+      "failed-payments:6",
+      "invoices:6",
+      "invoices:14"
+    ]
   },
   {
     "id": "rc-04",
     "question": "Once a refund is issued, how long does it take to show up on my card?",
     "relevant_document_ids": ["refunds-and-duplicate-charges"],
-    "category": "direct"
+    "category": "direct",
+    "answer_chunk_ids": ["refunds-and-duplicate-charges:10"],
+    "answer_evidence": {
+      "refunds-and-duplicate-charges:10": "it usually takes **5 to 10 business days** to appear"
+    },
+    "mention_chunk_ids": [
+      "refunds-and-duplicate-charges:5",
+      "refunds-and-duplicate-charges:11"
+    ]
   },
   {
     "id": "rc-05",
@@ -37,11 +67,16 @@
     "relevant_document_ids": ["cancellation"],
     "category": "direct",
     "answer_chunk_ids": ["cancellation:4"],
+    "answer_evidence": {
+      "cancellation:4": "If you cancel on or after your renewal date, the renewal charge still applies."
+    },
     "mention_chunk_ids": [
       "cancellation:0",
       "cancellation:2",
       "cancellation:3",
-      "refunds-and-duplicate-charges:6"
+      "cancellation:13",
+      "refunds-and-duplicate-charges:6",
+      "refunds-and-duplicate-charges:8"
     ]
   },
   {
@@ -50,13 +85,21 @@
     "relevant_document_ids": ["troubleshooting"],
     "category": "direct",
     "answer_chunk_ids": ["troubleshooting:3"],
+    "answer_evidence": {
+      "troubleshooting:3": "Select **Forgot password** on the sign-in page."
+    },
     "mention_chunk_ids": ["account-settings:4", "account-settings:0"]
   },
   {
     "id": "rc-07",
     "question": "I'm leaving the company. How do I make a coworker the main person in charge of our Flowdesk account?",
     "relevant_document_ids": ["account-settings"],
-    "category": "paraphrased"
+    "category": "paraphrased",
+    "answer_chunk_ids": ["account-settings:11"],
+    "answer_evidence": {
+      "account-settings:11": "selects **Transfer ownership**, and chooses another team member"
+    },
+    "mention_chunk_ids": ["account-settings:9", "account-settings:10"]
   },
   {
     "id": "rc-08",
@@ -64,11 +107,16 @@
     "relevant_document_ids": ["failed-payments"],
     "category": "paraphrased",
     "answer_chunk_ids": ["failed-payments:5", "failed-payments:6"],
+    "answer_evidence": {
+      "failed-payments:5": "We retry automatically, once.",
+      "failed-payments:6": "After the day 3 retry, we don't try again automatically unless you update your card."
+    },
     "mention_chunk_ids": [
       "failed-payments:1",
       "failed-payments:2",
       "failed-payments:4",
       "failed-payments:7",
+      "failed-payments:8",
       "account-settings:14"
     ]
   },
@@ -76,7 +124,16 @@
     "id": "rc-09",
     "question": "I hit cancel by accident. How do I take it back?",
     "relevant_document_ids": ["cancellation"],
-    "category": "paraphrased"
+    "category": "paraphrased",
+    "answer_chunk_ids": ["cancellation:13"],
+    "answer_evidence": {
+      "cancellation:13": "select **Keep subscription**. The cancellation is removed"
+    },
+    "mention_chunk_ids": [
+      "cancellation:1",
+      "cancellation:14",
+      "subscription-changes:12"
+    ]
   },
   {
     "id": "rc-10",
@@ -84,6 +141,10 @@
     "relevant_document_ids": ["troubleshooting"],
     "category": "paraphrased",
     "answer_chunk_ids": ["troubleshooting:15", "troubleshooting:16"],
+    "answer_evidence": {
+      "troubleshooting:15": "Approve **all** the requested permissions.",
+      "troubleshooting:16": "**Changed password:** changing your password with the other service can cancel its connections."
+    },
     "mention_chunk_ids": [
       "account-settings:12",
       "troubleshooting:11",
@@ -108,6 +169,12 @@
       "invoices:8",
       "refunds-and-duplicate-charges:1"
     ],
+    "answer_evidence": {
+      "subscription-changes:6": "You pay the price difference for the days left in the period, on a separate invoice.",
+      "subscription-changes:16": "or a prorated amount if you upgraded during a billing period",
+      "invoices:8": "You upgraded during a billing period and paid a prorated difference.",
+      "refunds-and-duplicate-charges:1": "No. The smaller one is a prorated upgrade charge."
+    },
     "mention_chunk_ids": [
       "subscription-changes:5",
       "subscription-changes:7",
@@ -123,7 +190,32 @@
       "cancellation",
       "account-settings"
     ],
-    "category": "ambiguous"
+    "category": "ambiguous",
+    "answer_chunk_ids": [
+      "troubleshooting:5",
+      "troubleshooting:6",
+      "failed-payments:14",
+      "cancellation:8",
+      "account-settings:10",
+      "account-settings:18"
+    ],
+    "answer_evidence": {
+      "troubleshooting:5": "Your account is suspended because of an overdue invoice.",
+      "troubleshooting:6": "Your projects are read-only if your subscription has ended.",
+      "failed-payments:14": "Your team can't view or edit projects.",
+      "cancellation:8": "Your data is retained, but your projects become read-only.",
+      "account-settings:10": "| Viewer | View and comment | No | No |",
+      "account-settings:18": "Access is restricted because an invoice is more than 30 days overdue."
+    },
+    "mention_chunk_ids": [
+      "troubleshooting:1",
+      "troubleshooting:2",
+      "failed-payments:10",
+      "failed-payments:15",
+      "cancellation:9",
+      "cancellation:12",
+      "account-settings:20"
+    ]
   },
   {
     "id": "rc-13",
@@ -143,13 +235,25 @@
       "invoices:7",
       "invoices:8"
     ],
+    "answer_evidence": {
+      "refunds-and-duplicate-charges:1": "| Two **successful** payments on the same invoice | **Possibly yes.** Report it to support. |",
+      "refunds-and-duplicate-charges:2": "two successful payments of the same amount, made close together, on one invoice",
+      "refunds-and-duplicate-charges:3": "can look like a double charge, particularly on a card statement",
+      "failed-payments:3": "Some banks briefly show a pending authorization when an attempt fails.",
+      "failed-payments:18": "A failed attempt followed by a successful one isn't a double charge.",
+      "invoices:7": "Two **successful** attempts on one invoice is different, and could be a duplicate charge.",
+      "invoices:8": "| An extra invoice for a small amount | You upgraded during a billing period and paid a prorated difference. |"
+    },
     "mention_chunk_ids": [
       "refunds-and-duplicate-charges:0",
       "refunds-and-duplicate-charges:4",
+      "refunds-and-duplicate-charges:6",
       "refunds-and-duplicate-charges:12",
       "failed-payments:0",
+      "failed-payments:7",
       "invoices:6",
-      "subscription-changes:6"
+      "subscription-changes:6",
+      "subscription-changes:16"
     ]
   },
   {
@@ -158,10 +262,15 @@
     "relevant_document_ids": ["account-settings"],
     "category": "ambiguous",
     "answer_chunk_ids": ["account-settings:2", "account-settings:15"],
+    "answer_evidence": {
+      "account-settings:2": "Select **Change email**.",
+      "account-settings:15": "For security, the support team makes this change."
+    },
     "mention_chunk_ids": [
       "account-settings:0",
       "invoices:12",
       "troubleshooting:23",
+      "support-tickets:5",
       "support-tickets:9",
       "support-tickets:15",
       "support-tickets:16"
@@ -175,7 +284,27 @@
       "cancellation",
       "account-settings"
     ],
-    "category": "ambiguous"
+    "category": "ambiguous",
+    "answer_chunk_ids": [
+      "refunds-and-duplicate-charges:6",
+      "refunds-and-duplicate-charges:7",
+      "refunds-and-duplicate-charges:8",
+      "cancellation:5",
+      "account-settings:20"
+    ],
+    "answer_evidence": {
+      "refunds-and-duplicate-charges:6": "| Unused time after canceling | No refund |",
+      "refunds-and-duplicate-charges:7": "After 30 days, annual payments aren't refundable",
+      "refunds-and-duplicate-charges:8": "We don't refund monthly payments or part-used months",
+      "cancellation:5": "We don't offer refunds for unused time on monthly plans.",
+      "account-settings:20": "Closing your account doesn't refund any unused time."
+    },
+    "mention_chunk_ids": [
+      "cancellation:0",
+      "cancellation:2",
+      "cancellation:10",
+      "cancellation:15"
+    ]
   },
   {
     "id": "rc-16",
@@ -183,13 +312,21 @@
     "relevant_document_ids": ["cancellation", "refunds-and-duplicate-charges"],
     "category": "multi-document",
     "answer_chunk_ids": ["cancellation:1", "refunds-and-duplicate-charges:7"],
+    "answer_evidence": {
+      "cancellation:1": "Select **Cancel subscription**.",
+      "refunds-and-duplicate-charges:7": "To do this, cancel your subscription and [open a support ticket](support-tickets.md)."
+    },
     "mention_chunk_ids": [
-      "refunds-and-duplicate-charges:6",
-      "cancellation:5",
+      "cancellation:0",
       "cancellation:2",
+      "cancellation:5",
+      "cancellation:16",
       "refunds-and-duplicate-charges:0",
+      "refunds-and-duplicate-charges:6",
       "support-tickets:1",
-      "support-tickets:2"
+      "support-tickets:2",
+      "support-tickets:15",
+      "subscription-changes:15"
     ]
   },
   {
@@ -199,13 +336,70 @@
       "refunds-and-duplicate-charges",
       "support-tickets"
     ],
-    "category": "multi-document"
+    "category": "multi-document",
+    "answer_chunk_ids": [
+      "refunds-and-duplicate-charges:4",
+      "refunds-and-duplicate-charges:5",
+      "support-tickets:4",
+      "support-tickets:6"
+    ],
+    "answer_evidence": {
+      "refunds-and-duplicate-charges:4": "The payment numbers of both successful payments",
+      "refunds-and-duplicate-charges:5": "We aim to finish the review within 2 business days.",
+      "support-tickets:4": "For billing problems, include the invoice and payment numbers.",
+      "support-tickets:6": "| High | 1 business day | 4 business hours |"
+    },
+    "mention_chunk_ids": [
+      "refunds-and-duplicate-charges:1",
+      "refunds-and-duplicate-charges:2",
+      "refunds-and-duplicate-charges:3",
+      "support-tickets:2",
+      "support-tickets:3",
+      "support-tickets:5",
+      "support-tickets:8",
+      "support-tickets:16",
+      "failed-payments:18",
+      "invoices:7",
+      "account-settings:14"
+    ]
   },
   {
     "id": "rc-18",
     "question": "We're on Business and an automation rule our whole team relies on stopped running. What should I check, and how fast will support respond if I can't fix it?",
     "relevant_document_ids": ["troubleshooting", "support-tickets"],
-    "category": "multi-document"
+    "category": "multi-document",
+    "answer_chunk_ids": [
+      "troubleshooting:8",
+      "troubleshooting:9",
+      "troubleshooting:10",
+      "troubleshooting:11",
+      "troubleshooting:12",
+      "troubleshooting:13",
+      "support-tickets:6"
+    ],
+    "answer_evidence": {
+      "troubleshooting:8": "select the rule, and open **Run history**",
+      "troubleshooting:9": "If the rule shows as **Paused**, turn it back on.",
+      "troubleshooting:10": "Rules run only when the trigger happens, and only if every condition is true.",
+      "troubleshooting:11": "If the rule uses an integration that has disconnected, each run fails.",
+      "troubleshooting:12": "If a rule relies on an integration connected by someone who's since left the team",
+      "troubleshooting:13": "Automation rules stop running while an account is suspended.",
+      "support-tickets:6": "| High | 1 business day | 4 business hours |"
+    },
+    "mention_chunk_ids": [
+      "troubleshooting:2",
+      "troubleshooting:7",
+      "troubleshooting:14",
+      "support-tickets:4",
+      "support-tickets:5",
+      "support-tickets:8",
+      "subscription-changes:11",
+      "failed-payments:14",
+      "failed-payments:15",
+      "cancellation:8",
+      "cancellation:12",
+      "account-settings:9"
+    ]
   },
   {
     "id": "rc-19",
@@ -215,7 +409,25 @@
       "invoices",
       "failed-payments"
     ],
-    "category": "multi-document"
+    "category": "multi-document",
+    "answer_chunk_ids": [
+      "subscription-changes:13",
+      "invoices:8",
+      "failed-payments:17"
+    ],
+    "answer_evidence": {
+      "subscription-changes:13": "You pay the annual price, minus a credit for the unused days of your current month.",
+      "invoices:8": "| An annual charge below the listed price | You switched from monthly to annual, and unused days were credited. |",
+      "failed-payments:17": "Tell your bank to expect a charge if you've moved to an annual plan"
+    },
+    "mention_chunk_ids": [
+      "subscription-changes:0",
+      "subscription-changes:1",
+      "subscription-changes:3",
+      "subscription-changes:4",
+      "subscription-changes:14",
+      "failed-payments:2"
+    ]
   },
   {
     "id": "rc-20",
@@ -229,11 +441,16 @@
     "answer_chunk_ids": [
       "troubleshooting:4",
       "account-settings:5",
-      "support-tickets:2",
       "support-tickets:6"
     ],
+    "answer_evidence": {
+      "troubleshooting:4": "Use one of your recovery codes on the sign-in page.",
+      "account-settings:5": "If you lose your device and your recovery codes, the support team will need to verify your identity before they can turn it off.",
+      "support-tickets:6": "| High | 1 business day | 4 business hours |"
+    },
     "mention_chunk_ids": [
       "troubleshooting:3",
+      "support-tickets:2",
       "support-tickets:3",
       "support-tickets:4",
       "support-tickets:5",

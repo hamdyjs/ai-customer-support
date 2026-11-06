@@ -14,6 +14,11 @@ that just mention the topic or link to the answer count as irrelevant. It report
 Hit@1, Hit@3, Hit@5, Precision@3, Precision@5 and MRR, and calls out questions where
 an irrelevant chunk ranks above a relevant one.
 
+Before scoring, it checks every chunk label against the current articles, and checks
+that Qdrant holds exactly the chunks scripts/ingest.py would make from them now, so
+labels can never be scored against stale or different text. It stops with a list of
+problems if either check fails.
+
 Qdrant must be running, with the chunks stored by scripts/ingest.py. This doesn't use
 FastAPI or Claude. Run it from the repo root with:
 
@@ -29,7 +34,19 @@ from typing import Literal
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from qdrant_client import QdrantClient
 
-from app.retrieval import RetrievalError, get_qdrant_client, search_knowledge_base
+from app.retrieval import (
+    COLLECTION_NAME,
+    EMBEDDING_MODEL,
+    RetrievalError,
+    get_qdrant_client,
+    search_knowledge_base,
+)
+from scripts.ingest import (
+    DocumentChunkError,
+    DocumentLoadError,
+    chunk_documents,
+    load_documents,
+)
 
 CASES_FILE = Path(__file__).resolve().parents[1] / "eval" / "retrieval_cases.json"
 
@@ -44,8 +61,10 @@ class RetrievalCase(BaseModel):
     question: str
     relevant_document_ids: list[str] = Field(min_length=1)
     category: Literal["direct", "paraphrased", "ambiguous", "multi-document"]
-    # Only some questions have chunk labels. Answer chunks are the relevant ones.
+    # Chunk labels are optional. Answer chunks are the relevant ones, and each has a
+    # quote from its text that shows where the answer is.
     answer_chunk_ids: list[str] | None = Field(default=None, min_length=1)
+    answer_evidence: dict[str, str] = Field(default_factory=dict)
     mention_chunk_ids: list[str] = Field(default_factory=list)
 
 
@@ -93,6 +112,88 @@ def load_cases(path: Path = CASES_FILE) -> list[RetrievalCase]:
     if not cases:
         raise EvaluationError(f"{path} has no cases")
     return cases
+
+
+def current_chunks() -> dict[str, str]:
+    """Return each chunk's text by ID, as scripts/ingest.py would chunk the articles now."""
+    try:
+        return {chunk.id: chunk.text for chunk in chunk_documents(load_documents())}
+    except (DocumentLoadError, DocumentChunkError) as error:
+        raise EvaluationError(f"Cannot chunk the articles: {error}") from error
+
+
+def normalize(text: str) -> str:
+    """Collapse whitespace, since table columns are padded to line up."""
+    return " ".join(text.split())
+
+
+def check_labels(cases: list[RetrievalCase], chunks: dict[str, str]) -> list[str]:
+    """Return every way the chunk labels disagree with the chunks or each other."""
+    problems = []
+    texts = {chunk_id: normalize(text) for chunk_id, text in chunks.items()}
+    for case in cases:
+        if case.answer_chunk_ids is None:
+            continue
+        answers, mentions = case.answer_chunk_ids, case.mention_chunk_ids
+        for chunk_id in sorted(set(answers + mentions) - texts.keys()):
+            problems.append(f"{case.id}: {chunk_id} isn't a current chunk")
+        for chunk_id in sorted(set(answers) & set(mentions)):
+            problems.append(f"{case.id}: {chunk_id} is both an answer and a mention")
+        if set(case.answer_evidence) != set(answers):
+            problems.append(f"{case.id}: answer_evidence must quote each answer chunk")
+
+        for chunk_id, quote in case.answer_evidence.items():
+            quote = normalize(quote)
+            if chunk_id in texts and quote not in texts[chunk_id]:
+                problems.append(f"{case.id}: {chunk_id} doesn't contain {quote!r}")
+            # Neighboring chunks overlap, so an answer can appear in two of them.
+            for other_id, text in texts.items():
+                if quote in text and other_id not in answers:
+                    problems.append(
+                        f"{case.id}: {other_id} contains the answer {quote!r} but "
+                        "isn't labeled as an answer"
+                    )
+
+        answer_documents = {chunk_id.split(":")[0] for chunk_id in answers}
+        if answer_documents != set(case.relevant_document_ids):
+            problems.append(
+                f"{case.id}: answer chunks come from {sorted(answer_documents)}, but "
+                f"the relevant documents are {sorted(case.relevant_document_ids)}"
+            )
+    return problems
+
+
+def check_collection(client: QdrantClient, chunks: dict[str, str]) -> None:
+    """Stop unless Qdrant holds exactly these chunks, embedded with today's model."""
+    try:
+        collection = client.get_collection(COLLECTION_NAME)
+        stored: dict[str, str] = {}
+        offset = None
+        while True:
+            points, offset = client.scroll(
+                COLLECTION_NAME, limit=256, offset=offset, with_payload=True
+            )
+            for point in points:
+                payload = point.payload or {}
+                stored[payload["id"]] = payload["text"]
+            if offset is None:
+                break
+    except Exception as error:
+        raise EvaluationError(
+            f"Cannot read the {COLLECTION_NAME} collection: {error}"
+        ) from error
+
+    stored_model = (collection.config.metadata or {}).get("embedding_model")
+    changed = [
+        chunk_id for chunk_id in chunks if stored.get(chunk_id) != chunks[chunk_id]
+    ]
+    extra = stored.keys() - chunks.keys()
+    if stored_model != EMBEDDING_MODEL or changed or extra:
+        raise EvaluationError(
+            f"The {COLLECTION_NAME} collection doesn't match the current articles "
+            f"(model {stored_model!r}, {len(changed)} chunks missing or changed, "
+            f"{len(extra)} extra). Re-run: uv run python -m scripts.ingest"
+        )
 
 
 def unique_documents(document_ids: Iterable[str], limit: int) -> list[str]:
@@ -420,7 +521,14 @@ def print_chunk_report(results: list[ChunkCaseResult]) -> None:
 def main(cases_path: Path = CASES_FILE) -> int:
     try:
         cases = load_cases(cases_path)
+        chunks = current_chunks()
+        problems = check_labels(cases, chunks)
+        if problems:
+            raise EvaluationError(
+                "The chunk labels don't match the articles:\n  " + "\n  ".join(problems)
+            )
         client = get_qdrant_client()
+        check_collection(client, chunks)
         results = evaluate(client, cases)
         chunk_results = evaluate_chunks(client, cases)
     except (EvaluationError, RetrievalError) as error:

@@ -1,0 +1,230 @@
+Retrieval evaluation: 20 questions, judged on the first 5 different documents for each
+
+                           Hit@1   Hit@3   Hit@5     MRR
+  All (20)                  0.90    1.00    1.00    0.95
+  direct (6)                0.83    1.00    1.00    0.92
+  paraphrased (5)           0.80    1.00    1.00    0.90
+  ambiguous (4)             1.00    1.00    1.00    1.00
+  multi-document (5)        1.00    1.00    1.00    1.00
+
+Per question (* marks a relevant document)
+  rc-01  direct          rank 1  RR 1.00  found 1/1  from 24 chunks
+         1. invoices*  2. failed-payments  3. subscription-changes  4. cancellation  5. refunds-and-duplicate-charges
+  rc-02  direct          rank 1  RR 1.00  found 1/1  from 9 chunks
+         1. account-settings*  2. troubleshooting  3. subscription-changes  4. support-tickets  5. refunds-and-duplicate-charges
+  rc-03  direct          rank 1  RR 1.00  found 1/1  from 15 chunks
+         1. failed-payments*  2. invoices  3. troubleshooting  4. refunds-and-duplicate-charges  5. support-tickets
+  rc-04  direct          rank 1  RR 1.00  found 1/1  from 15 chunks
+         1. refunds-and-duplicate-charges*  2. cancellation  3. troubleshooting  4. failed-payments  5. support-tickets
+  rc-05  direct          rank 1  RR 1.00  found 1/1  from 17 chunks
+         1. cancellation*  2. refunds-and-duplicate-charges  3. failed-payments  4. account-settings  5. subscription-changes
+  rc-06  direct          rank 2  RR 0.50  found 1/1  from 18 chunks
+         1. account-settings  2. troubleshooting*  3. cancellation  4. support-tickets  5. failed-payments
+  rc-07  paraphrased     rank 1  RR 1.00  found 1/1  from 12 chunks
+         1. account-settings*  2. cancellation  3. subscription-changes  4. troubleshooting  5. support-tickets
+  rc-08  paraphrased     rank 1  RR 1.00  found 1/1  from 12 chunks
+         1. failed-payments*  2. refunds-and-duplicate-charges  3. account-settings  4. support-tickets  5. cancellation
+  rc-09  paraphrased     rank 1  RR 1.00  found 1/1  from 15 chunks
+         1. cancellation*  2. subscription-changes  3. refunds-and-duplicate-charges  4. support-tickets  5. troubleshooting
+  rc-10  paraphrased     rank 2  RR 0.50  found 1/1  from 12 chunks
+         1. account-settings  2. troubleshooting*  3. support-tickets  4. subscription-changes  5. cancellation
+  rc-11  paraphrased     rank 1  RR 1.00  found 3/3  from 11 chunks
+         1. invoices*  2. subscription-changes*  3. refunds-and-duplicate-charges*  4. failed-payments  5. cancellation
+  rc-12  ambiguous       rank 1  RR 1.00  found 3/4  from 16 chunks
+         1. troubleshooting*  2. cancellation*  3. account-settings*  4. support-tickets  5. subscription-changes
+  rc-13  ambiguous       rank 1  RR 1.00  found 3/3  from 15 chunks
+         1. refunds-and-duplicate-charges*  2. subscription-changes  3. failed-payments*  4. invoices*  5. cancellation
+  rc-14  ambiguous       rank 1  RR 1.00  found 1/1  from 16 chunks
+         1. account-settings*  2. invoices  3. troubleshooting  4. support-tickets  5. subscription-changes
+  rc-15  ambiguous       rank 1  RR 1.00  found 3/3  from 21 chunks
+         1. cancellation*  2. subscription-changes  3. refunds-and-duplicate-charges*  4. account-settings*  5. support-tickets
+  rc-16  multi-document  rank 1  RR 1.00  found 2/2  from 20 chunks
+         1. cancellation*  2. refunds-and-duplicate-charges*  3. account-settings  4. subscription-changes  5. failed-payments
+  rc-17  multi-document  rank 1  RR 1.00  found 2/2  from 22 chunks
+         1. refunds-and-duplicate-charges*  2. failed-payments  3. support-tickets*  4. subscription-changes  5. invoices
+  rc-18  multi-document  rank 1  RR 1.00  found 2/2  from 11 chunks
+         1. troubleshooting*  2. support-tickets*  3. cancellation  4. failed-payments  5. account-settings
+  rc-19  multi-document  rank 1  RR 1.00  found 3/3  from 15 chunks
+         1. subscription-changes*  2. invoices*  3. account-settings  4. failed-payments*  5. cancellation
+  rc-20  multi-document  rank 1  RR 1.00  found 3/3  from 14 chunks
+         1. troubleshooting*  2. account-settings*  3. cancellation  4. failed-payments  5. support-tickets*
+
+Misses: no relevant document in the first 5 different documents
+  None
+
+Questions with fewer than 5 different documents available
+  None
+
+========================================================================================
+
+Chunk-level evaluation: 20 questions with labeled chunks, judged on the top 5 chunks as search returns them
+
+                           Hit@1   Hit@3   Hit@5     P@3     P@5     MRR
+  All (20)                  0.65    0.85    0.90    0.38    0.28    0.75
+  direct (6)                0.83    0.83    1.00    0.28    0.20    0.88
+  paraphrased (5)           0.40    0.80    0.80    0.40    0.24    0.57
+  ambiguous (4)             0.75    0.75    0.75    0.33    0.25    0.75
+  multi-document (5)        0.60    1.00    1.00    0.53    0.44    0.80
+  Best possible             1.00    1.00    1.00    0.67    0.50    1.00
+  (Precision can't reach 1.00 when a question has fewer answer chunks than places.)
+
+Per question (ANSWER: labeled answer, mention: mentions the topic or links to the answer, -: other)
+  rc-01  direct          rank 1  RR 1.00  P@3 0.33  P@5 0.20  found 1/1 answer chunks
+         1. ANSWER  0.583  invoices:1
+         2. mention 0.502  invoices:2
+         3. -       0.487  invoices:4
+         4. -       0.440  invoices:14
+         5. -       0.401  failed-payments:12
+  rc-02  direct          rank 1  RR 1.00  P@3 0.33  P@5 0.20  found 1/1 answer chunks
+         1. ANSWER  0.662  account-settings:5
+         2. mention 0.595  troubleshooting:4
+         3. mention 0.432  account-settings:0
+         4. -       0.407  account-settings:2
+         5. -       0.361  troubleshooting:3
+  rc-03  direct          rank 1  RR 1.00  P@3 0.33  P@5 0.20  found 1/1 answer chunks
+         1. ANSWER  0.653  failed-payments:2
+         2. -       0.595  failed-payments:3
+         3. -       0.587  failed-payments:7
+         4. -       0.575  failed-payments:8
+         5. -       0.554  failed-payments:4
+  rc-04  direct          rank 1  RR 1.00  P@3 0.33  P@5 0.20  found 1/1 answer chunks
+         1. ANSWER  0.764  refunds-and-duplicate-charges:10
+         2. -       0.523  refunds-and-duplicate-charges:7
+         3. -       0.452  cancellation:5
+         4. mention 0.447  refunds-and-duplicate-charges:5
+         5. mention 0.433  refunds-and-duplicate-charges:11
+  rc-05  direct          rank 1  RR 1.00  P@3 0.33  P@5 0.20  found 1/1 answer chunks
+         1. ANSWER  0.806  cancellation:4
+         2. mention 0.734  cancellation:13
+         3. -       0.626  cancellation:5
+         4. mention 0.599  refunds-and-duplicate-charges:8
+         5. -       0.598  cancellation:15
+  rc-06  direct          rank 4  RR 0.25  P@3 0.00  P@5 0.20  found 1/1 answer chunks
+         1. mention 0.526  account-settings:4
+         2. -       0.376  account-settings:5
+         3. -       0.367  troubleshooting:4
+         4. ANSWER  0.366  troubleshooting:3
+         5. -       0.323  account-settings:2
+  rc-07  paraphrased     rank 3  RR 0.33  P@3 0.33  P@5 0.20  found 1/1 answer chunks
+         1. -       0.675  account-settings:0
+         2. -       0.569  account-settings:17
+         3. ANSWER  0.555  account-settings:11
+         4. -       0.532  cancellation:1
+         5. -       0.507  subscription-changes:0
+  rc-08  paraphrased     MISS    RR 0.00  P@3 0.00  P@5 0.00  found 0/2 answer chunks
+         1. mention 0.485  failed-payments:4
+         2. -       0.465  refunds-and-duplicate-charges:9
+         3. mention 0.463  account-settings:14
+         4. -       0.449  refunds-and-duplicate-charges:5
+         5. -       0.425  support-tickets:16
+  rc-09  paraphrased     rank 1  RR 1.00  P@3 0.33  P@5 0.20  found 1/1 answer chunks
+         1. ANSWER  0.512  cancellation:13
+         2. -       0.499  cancellation:16
+         3. mention 0.475  cancellation:1
+         4. -       0.472  cancellation:0
+         5. -       0.448  cancellation:4
+  rc-10  paraphrased     rank 2  RR 0.50  P@3 0.67  P@5 0.40  found 2/2 answer chunks
+         1. mention 0.722  account-settings:12
+         2. ANSWER  0.686  troubleshooting:15
+         3. ANSWER  0.621  troubleshooting:16
+         4. -       0.456  troubleshooting:3
+         5. -       0.408  troubleshooting:27
+  rc-11  paraphrased     rank 1  RR 1.00  P@3 0.67  P@5 0.40  found 2/4 answer chunks
+         1. ANSWER  0.541  invoices:8
+         2. ANSWER  0.477  subscription-changes:16
+         3. -       0.426  invoices:7
+         4. -       0.425  subscription-changes:10
+         5. -       0.420  refunds-and-duplicate-charges:3
+  rc-12  ambiguous       rank 1  RR 1.00  P@3 0.33  P@5 0.20  found 1/6 answer chunks
+         1. ANSWER  0.543  troubleshooting:6
+         2. -       0.391  cancellation:11
+         3. mention 0.385  cancellation:12
+         4. -       0.385  troubleshooting:12
+         5. -       0.381  troubleshooting:10
+  rc-13  ambiguous       rank 1  RR 1.00  P@3 0.33  P@5 0.40  found 2/7 answer chunks
+         1. ANSWER  0.639  refunds-and-duplicate-charges:3
+         2. mention 0.605  refunds-and-duplicate-charges:0
+         3. mention 0.581  subscription-changes:16
+         4. ANSWER  0.573  refunds-and-duplicate-charges:2
+         5. mention 0.561  refunds-and-duplicate-charges:4
+  rc-14  ambiguous       rank 1  RR 1.00  P@3 0.67  P@5 0.40  found 2/2 answer chunks
+         1. ANSWER  0.612  account-settings:2
+         2. ANSWER  0.463  account-settings:15
+         3. -       0.398  account-settings:1
+         4. mention 0.398  invoices:12
+         5. mention 0.372  troubleshooting:23
+  rc-15  ambiguous       MISS    RR 0.00  P@3 0.00  P@5 0.00  found 0/5 answer chunks
+         1. mention 0.650  cancellation:0
+         2. -       0.594  subscription-changes:14
+         3. -       0.581  subscription-changes:15
+         4. -       0.580  subscription-changes:12
+         5. -       0.540  subscription-changes:9
+  rc-16  multi-document  rank 2  RR 0.50  P@3 0.33  P@5 0.40  found 2/2 answer chunks
+         1. mention 0.561  cancellation:5
+         2. ANSWER  0.541  cancellation:1
+         3. -       0.531  cancellation:14
+         4. -       0.517  refunds-and-duplicate-charges:8
+         5. ANSWER  0.515  refunds-and-duplicate-charges:7
+  rc-17  multi-document  rank 1  RR 1.00  P@3 0.33  P@5 0.40  found 2/4 answer chunks
+         1. ANSWER  0.522  refunds-and-duplicate-charges:5
+         2. mention 0.517  refunds-and-duplicate-charges:1
+         3. -       0.490  refunds-and-duplicate-charges:9
+         4. mention 0.486  refunds-and-duplicate-charges:3
+         5. ANSWER  0.483  refunds-and-duplicate-charges:4
+  rc-18  multi-document  rank 2  RR 0.50  P@3 0.67  P@5 0.60  found 3/7 answer chunks
+         1. mention 0.650  troubleshooting:14
+         2. ANSWER  0.595  troubleshooting:12
+         3. ANSWER  0.590  troubleshooting:8
+         4. ANSWER  0.580  troubleshooting:9
+         5. mention 0.545  troubleshooting:7
+  rc-19  multi-document  rank 1  RR 1.00  P@3 0.67  P@5 0.40  found 2/3 answer chunks
+         1. ANSWER  0.719  subscription-changes:13
+         2. ANSWER  0.658  invoices:8
+         3. -       0.613  subscription-changes:6
+         4. -       0.612  subscription-changes:7
+         5. mention 0.577  subscription-changes:14
+  rc-20  multi-document  rank 1  RR 1.00  P@3 0.67  P@5 0.40  found 2/3 answer chunks
+         1. ANSWER  0.603  troubleshooting:4
+         2. ANSWER  0.543  account-settings:5
+         3. -       0.496  account-settings:4
+         4. mention 0.440  troubleshooting:3
+         5. -       0.430  troubleshooting:5
+
+Relevant chunks ranked below irrelevant ones
+  rc-06  answer chunks at 4, with these irrelevant chunks above them:
+         1. account-settings:4 (mention); 2. account-settings:5 (-); 3. troubleshooting:4 (-)
+  rc-07  answer chunks at 3, with these irrelevant chunks above them:
+         1. account-settings:0 (-); 2. account-settings:17 (-)
+  rc-10  answer chunks at 2, 3, with these irrelevant chunks above them:
+         1. account-settings:12 (mention)
+  rc-13  answer chunks at 1, 4, with these irrelevant chunks above them:
+         2. refunds-and-duplicate-charges:0 (mention); 3. subscription-changes:16 (mention)
+  rc-16  answer chunks at 2, 5, with these irrelevant chunks above them:
+         1. cancellation:5 (mention); 3. cancellation:14 (-); 4. refunds-and-duplicate-charges:8 (-)
+  rc-17  answer chunks at 1, 5, with these irrelevant chunks above them:
+         2. refunds-and-duplicate-charges:1 (mention); 3. refunds-and-duplicate-charges:9 (-); 4. refunds-and-duplicate-charges:3 (mention)
+  rc-18  answer chunks at 2, 3, 4, with these irrelevant chunks above them:
+         1. troubleshooting:14 (mention)
+
+Misses: no answer chunk in the top 5
+  rc-08 (paraphrased) My card got declined. Will you have another go at charging it without me doing anything, and how many tries do I get?
+         expected one of: failed-payments:5, failed-payments:6
+  rc-15 (ambiguous) If we stop using Flowdesk partway through what we've paid for, do we get money back for the unused time?
+         expected one of: refunds-and-duplicate-charges:6, refunds-and-duplicate-charges:7, refunds-and-duplicate-charges:8, cancellation:5, account-settings:20
+
+Questions that need several pieces of information: answer chunks found
+  rc-16  2 of 2
+         found:   cancellation:1, refunds-and-duplicate-charges:7
+         missing: none
+  rc-17  2 of 4
+         found:   refunds-and-duplicate-charges:4, refunds-and-duplicate-charges:5
+         missing: support-tickets:4, support-tickets:6
+  rc-18  3 of 7
+         found:   troubleshooting:8, troubleshooting:9, troubleshooting:12
+         missing: troubleshooting:10, troubleshooting:11, troubleshooting:13, support-tickets:6
+  rc-19  2 of 3
+         found:   subscription-changes:13, invoices:8
+         missing: failed-payments:17
+  rc-20  2 of 3
+         found:   troubleshooting:4, account-settings:5
+         missing: support-tickets:6

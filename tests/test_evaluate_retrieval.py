@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import pytest
+from qdrant_client import QdrantClient, models
 
-from app.retrieval import SearchResult
+from app.retrieval import COLLECTION_NAME, EMBEDDING_MODEL, SearchResult
 from scripts import evaluate_retrieval
 from scripts.evaluate_retrieval import (
     CaseResult,
@@ -10,6 +11,9 @@ from scripts.evaluate_retrieval import (
     EvaluationError,
     RetrievalCase,
     best_possible_precisions,
+    check_collection,
+    check_labels,
+    current_chunks,
     evaluate_chunks,
     first_relevant_rank,
     hit_at,
@@ -24,7 +28,6 @@ from scripts.evaluate_retrieval import (
     score_chunks,
     unique_documents,
 )
-from scripts.ingest import chunk_documents, load_documents
 
 KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge_base"
 
@@ -391,16 +394,140 @@ def test_cases_without_chunk_labels_load():
     assert case.mention_chunk_ids == []
 
 
-# Every chunk label names a real chunk from the current chunking, never in both lists,
-# and answer chunks come from the question's relevant articles.
-def test_dataset_chunk_labels_match_current_chunks():
-    chunk_ids = {chunk.id for chunk in chunk_documents(load_documents())}
-    labeled = [case for case in load_cases() if case.answer_chunk_ids is not None]
+CHUNKS = {
+    "a:0": "Article A\n\nSee [the steps](a.md#steps).",
+    "a:1": "Article A\nSteps\n\nSelect **Start**. It works   right away.",
+    "a:2": "Article A\nSteps\n\nworks right away. Something else entirely.",
+    "b:0": "Article B\n\nUnrelated text.",
+}
 
-    assert len(labeled) == 10
-    for case in labeled:
-        answers, mentions = set(case.answer_chunk_ids), set(case.mention_chunk_ids)
-        assert answers | mentions <= chunk_ids, case.id
-        assert not answers & mentions, case.id
-        answer_documents = {chunk_id.split(":")[0] for chunk_id in answers}
-        assert answer_documents <= set(case.relevant_document_ids), case.id
+
+def make_labeled_case(evidence, mentions=(), documents=("a",)):
+    return RetrievalCase(
+        id="case",
+        question="A question",
+        relevant_document_ids=list(documents),
+        category="direct",
+        answer_chunk_ids=list(evidence),
+        answer_evidence=evidence,
+        mention_chunk_ids=list(mentions),
+    )
+
+
+# A consistent label passes, even when the quote's spacing differs from the chunk's.
+def test_check_labels_accepts_consistent_labels():
+    case = make_labeled_case({"a:1": "Select **Start**."}, mentions=["a:0"])
+
+    assert check_labels([case], CHUNKS) == []
+
+
+# Each kind of labeling mistake is reported.
+@pytest.mark.parametrize(
+    "case, problem",
+    [
+        (
+            make_labeled_case({"a:1": "Select **Start**."}, mentions=["a:9"]),
+            "a:9 isn't a current chunk",
+        ),
+        (
+            make_labeled_case({"a:1": "Select **Start**."}, mentions=["a:1"]),
+            "a:1 is both an answer and a mention",
+        ),
+        (
+            make_labeled_case({"a:1": "Click **Go**."}),
+            "a:1 doesn't contain",
+        ),
+        (
+            # The quote also appears in the next chunk's overlap, which isn't labeled.
+            make_labeled_case({"a:1": "works right away."}),
+            "a:2 contains the answer",
+        ),
+        (
+            # A mention can't hold the answer either.
+            make_labeled_case({"a:1": "works right away."}, mentions=["a:2"]),
+            "a:2 contains the answer",
+        ),
+        (
+            make_labeled_case({"a:1": "Select **Start**."}, documents=["a", "b"]),
+            "the relevant documents are ['a', 'b']",
+        ),
+    ],
+)
+def test_check_labels_reports_mistakes(case, problem):
+    assert any(problem in found for found in check_labels([case], CHUNKS))
+
+
+# Every answer chunk needs a quote, and every quote needs an answer chunk.
+def test_check_labels_requires_evidence_for_each_answer():
+    case = make_labeled_case({"a:1": "Select **Start**."})
+    case.answer_chunk_ids = ["a:1", "a:2"]
+
+    assert any(
+        "must quote each answer chunk" in p for p in check_labels([case], CHUNKS)
+    )
+
+
+# Questions without chunk labels aren't checked.
+def test_check_labels_skips_unlabeled_cases():
+    assert check_labels([make_result([], ["a"]).case], CHUNKS) == []
+
+
+def make_collection(chunks, model=EMBEDDING_MODEL):
+    client = QdrantClient(":memory:")
+    client.create_collection(
+        COLLECTION_NAME,
+        vectors_config=models.VectorParams(size=2, distance=models.Distance.COSINE),
+        metadata={"embedding_model": model},
+    )
+    client.upsert(
+        COLLECTION_NAME,
+        points=[
+            models.PointStruct(
+                id=index, vector=[1.0, 0.0], payload={"id": chunk_id, "text": text}
+            )
+            for index, (chunk_id, text) in enumerate(chunks.items())
+        ],
+    )
+    return client
+
+
+# A collection holding exactly the current chunks passes.
+def test_check_collection_accepts_matching_chunks():
+    check_collection(make_collection(CHUNKS), CHUNKS)
+
+
+# Stale or different data stops the run, saying to re-run the ingest script.
+@pytest.mark.parametrize(
+    "stored, model, problem",
+    [
+        (
+            {**CHUNKS, "a:1": "Old text."},
+            EMBEDDING_MODEL,
+            "1 chunks missing or changed",
+        ),
+        ({k: v for k, v in CHUNKS.items() if k != "b:0"}, EMBEDDING_MODEL, "1 chunks"),
+        ({**CHUNKS, "c:0": "Removed article."}, EMBEDDING_MODEL, "1 extra"),
+        (CHUNKS, "another-model", "model 'another-model'"),
+    ],
+)
+def test_check_collection_rejects_mismatches(stored, model, problem):
+    with pytest.raises(EvaluationError, match="scripts.ingest") as error:
+        check_collection(make_collection(stored, model), CHUNKS)
+
+    assert problem in str(error.value)
+
+
+# A missing collection is a clear error rather than a traceback.
+def test_check_collection_reports_missing_collection():
+    with pytest.raises(EvaluationError, match="Cannot read"):
+        check_collection(QdrantClient(":memory:"), CHUNKS)
+
+
+# Every question has chunk labels, and they pass every check against the current
+# articles: real chunk IDs, quotes found only in answer chunks, and answer chunks
+# that cover exactly the question's relevant articles.
+def test_dataset_chunk_labels_pass_every_check():
+    cases = load_cases()
+
+    assert all(case.answer_chunk_ids is not None for case in cases)
+    assert check_labels(cases, current_chunks()) == []

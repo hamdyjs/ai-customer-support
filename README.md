@@ -236,9 +236,29 @@ uv run python -m scripts.evaluate_retrieval
 
 There are only 8 articles, so any 5 of them cover most of the knowledge base, and even a random order would reach about 0.77 Hit@5 on this dataset. Hit@1 and MRR say more about search quality.
 
-The same run then evaluates chunks for the 10 questions that also have `answer_chunk_ids`. It takes the top 5 chunks exactly as search returns them, so several chunks can come from one article. Only chunks labeled as answering the question count as relevant. Chunks in `mention_chunk_ids` only mention the topic or link to the answer, so they count as irrelevant, but the report marks them. It reports Hit@1, Hit@3, Hit@5, Precision@3, Precision@5 and MRR. It then lists questions where an irrelevant chunk ranks above an answer, questions with no answer chunk in the top 5, and which answer chunks were found for multi-document questions. Precision divides by the number of places, so a question with one answer chunk can't score above 0.20 for Precision@5. The report shows the best possible scores for comparison.
+The same run then evaluates chunks for every question, using its `answer_chunk_ids`. It takes the top 5 chunks exactly as search returns them, so several chunks can come from one article. Only chunks labeled as answering the question count as relevant. Chunks in `mention_chunk_ids` only mention the topic or link to the answer, so they count as irrelevant, but the report marks them. It reports Hit@1, Hit@3, Hit@5, Precision@3, Precision@5 and MRR. It then lists questions where an irrelevant chunk ranks above an answer, questions with no answer chunk in the top 5, and which answer chunks were found for multi-document questions. Precision divides by the number of places, so a question with one answer chunk can't score above 0.20 for Precision@5. The report shows the best possible scores for comparison.
 
-The chunk labels use the IDs that `scripts/ingest.py` gives chunks, so changing how articles are chunked means relabeling them. A test checks that every labeled chunk still exists.
+Chunks are labeled from their text alone, never from search results, using these rules:
+
+- **Answer:** on its own, the chunk addresses the customer's situation and resolves it. For an ambiguous question, that can be one interpretation of it, and for a two-part question, one part. For a "how do I" question, the chunk must give the action, and for a "will", "do" or "does" question, the outcome. A fact written for a different situation, such as an example about expired cards, doesn't count.
+- **Mention:** the chunk names the question's situation or task, or links to the section that answers it, but doesn't resolve it. This includes related facts written for a different situation.
+- **Neither:** chunks that only share words with the question.
+
+Each answer chunk has a quote from its text in `answer_evidence`. The labels name chunk IDs from `scripts/ingest.py`, so they're checked before every run, and by a test:
+
+- Every labeled chunk exists, and none is both an answer and a mention.
+- Every quote is in its chunk. Any other chunk that contains it, such as the overlapping start of the next chunk, must also be labeled as an answer.
+- A question's answer chunks come from exactly its `relevant_document_ids`.
+
+The run also checks that Qdrant holds exactly the chunks the ingest script would make from the current articles, embedded with the current model. If the articles or chunking changed and the labels or Qdrant data weren't updated, it stops and lists the problems instead of scoring against stale text.
+
+`eval/baseline_report.txt` is the full report from before any retrieval improvements. The report is the same on every run with the same articles, model and Qdrant data, so to see exactly which scores and questions a change moved, compare a new run against it:
+
+```bash
+uv run python -m scripts.evaluate_retrieval | diff eval/baseline_report.txt -
+```
+
+With 20 questions, one question moves Hit@1 by 0.05, so check which questions changed rather than relying only on the averages.
 
 ## Configuration
 
@@ -265,7 +285,8 @@ app/
     ├── models.py      # Tables
     └── seed.py        # Fake data
 eval/
-└── retrieval_cases.json  # Customer questions labeled with the articles, and some with the chunks, that answer them
+├── baseline_report.txt   # Evaluation report from before any retrieval improvements
+└── retrieval_cases.json  # Customer questions labeled with the articles and chunks that answer them
 knowledge_base/        # Markdown help articles
 qdrant_storage/        # Qdrant's data from Docker, not committed
 scripts/
