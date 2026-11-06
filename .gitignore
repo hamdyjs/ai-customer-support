@@ -17,3 +17,6 @@ data/knowledge_base.json
 
 # Local environment variables
 .env
+
+# Qdrant
+qdrant_storage/
