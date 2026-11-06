@@ -1,13 +1,15 @@
 import itertools
-import json
 import sys
 import types
+import uuid
 
 import numpy as np
 import pytest
+from qdrant_client import QdrantClient, models
 
 from scripts import ingest
 from scripts.ingest import (
+    COLLECTION_NAME,
     EMBEDDING_DIMENSIONS,
     EMBEDDING_MODEL,
     MAX_CHUNK_TOKENS,
@@ -20,14 +22,15 @@ from scripts.ingest import (
     DocumentLoadError,
     DocumentStoreError,
     EmbeddedChunk,
-    KnowledgeBase,
     chunk_documents,
     count_tokens,
     generate_embeddings,
     get_embedding_model,
+    get_qdrant_client,
     load_documents,
     main,
-    save_knowledge_base,
+    point_id,
+    store_knowledge_base,
 )
 
 
@@ -58,6 +61,23 @@ def model_must_not_load(monkeypatch):
         pytest.fail("The embedding model should not have been loaded")
 
     monkeypatch.setattr(ingest, "get_embedding_model", fail)
+
+
+# Storing replaces the collection, so no test may reach the real Qdrant server.
+@pytest.fixture(autouse=True)
+def real_qdrant_must_not_be_used(monkeypatch):
+    def fail():
+        pytest.fail("Tests must use the in-memory qdrant fixture")
+
+    monkeypatch.setattr(ingest, "get_qdrant_client", fail)
+
+
+# Qdrant's in-memory mode works like the server, so these tests don't need Docker.
+@pytest.fixture
+def qdrant(monkeypatch):
+    client = QdrantClient(":memory:")
+    monkeypatch.setattr(ingest, "get_qdrant_client", lambda: client)
+    return client
 
 
 # Each field is filled in from the file's name, heading and text.
@@ -185,10 +205,10 @@ def test_missing_title_raises_clear_error(tmp_path, content):
 
 
 # The script prints chunks for review, without the old list of files and titles.
-def test_main_prints_chunks(tmp_path, capsys, fake_model):
+def test_main_prints_chunks(tmp_path, capsys, fake_model, qdrant):
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
 
-    assert main(tmp_path, tmp_path / "output.json") == 0
+    assert main(tmp_path) == 0
 
     output = capsys.readouterr().out
     assert "Article\n\nSome text." in output
@@ -198,13 +218,13 @@ def test_main_prints_chunks(tmp_path, capsys, fake_model):
 
 
 # The sample is capped and spread across all the chunks, not just the first ones.
-def test_main_prints_an_even_sample(tmp_path, capsys, fake_model):
+def test_main_prints_an_even_sample(tmp_path, capsys, fake_model, qdrant):
     for number in range(100):
         (tmp_path / f"{number:03}.md").write_text(
             f"# Article {number:03}\n\nText.\n", encoding="utf-8"
         )
 
-    assert main(tmp_path, tmp_path / "output.json") == 0
+    assert main(tmp_path) == 0
 
     output = capsys.readouterr().out
     assert output.count("--- ") == SAMPLE_CHUNKS
@@ -681,135 +701,154 @@ def test_model_load_failure_raises_clear_error(monkeypatch):
         get_embedding_model()
 
 
+# Each vector points a different way, so a mix-up would show. They're unit length
+# because Qdrant normalizes vectors for cosine distance.
 def make_embedded_chunks(count=2):
     return [
         EmbeddedChunk(
             chunk=make_chunk(f"Text {index}", chunk_index=index),
-            embedding=[index + 0.1] * EMBEDDING_DIMENSIONS,
+            embedding=[
+                1.0 if position == index else 0.0
+                for position in range(EMBEDDING_DIMENSIONS)
+            ],
         )
         for index in range(count)
     ]
 
 
-# The file records which model made the vectors and reads back exactly as saved.
-def test_saved_file_has_metadata_and_reads_back(tmp_path):
-    path = tmp_path / "knowledge_base.json"
-    embedded_chunks = make_embedded_chunks()
-
-    save_knowledge_base(embedded_chunks, path)
-
-    assert json.loads(path.read_text(encoding="utf-8"))["metadata"] == {
-        "embedding_model": EMBEDDING_MODEL,
-        "embedding_dimensions": EMBEDDING_DIMENSIONS,
-        "chunk_count": 2,
-    }
-    saved = KnowledgeBase.model_validate_json(path.read_text(encoding="utf-8"))
-    assert saved.chunks == embedded_chunks
+def stored_points(client):
+    points, _ = client.scroll(COLLECTION_NAME, limit=1000, with_vectors=True)
+    return sorted(points, key=lambda point: point.payload["chunk_index"])
 
 
-# The data directory doesn't exist on a fresh checkout, so it gets created.
-def test_save_creates_missing_directories(tmp_path):
-    path = tmp_path / "new" / "folder" / "knowledge_base.json"
-
-    save_knowledge_base(make_embedded_chunks(), path)
-
-    assert path.exists()
+def fail_to_connect(*args, **kwargs):
+    raise ConnectionError("Connection refused")
 
 
-# A new save replaces the old contents entirely, rather than adding to them.
-def test_save_replaces_previous_file(tmp_path):
-    path = tmp_path / "knowledge_base.json"
-    save_knowledge_base(make_embedded_chunks(3), path)
+# The collection fits the model's vectors, uses cosine distance and names the model.
+def test_store_creates_collection_for_the_model(qdrant):
+    store_knowledge_base(make_embedded_chunks(), qdrant)
 
-    save_knowledge_base(make_embedded_chunks(1), path)
-
-    saved = KnowledgeBase.model_validate_json(path.read_text(encoding="utf-8"))
-    assert saved.metadata.chunk_count == 1
-    assert len(saved.chunks) == 1
+    config = qdrant.get_collection(COLLECTION_NAME).config
+    assert config.params.vectors.size == EMBEDDING_DIMENSIONS
+    assert config.params.vectors.distance == models.Distance.COSINE
+    assert config.metadata == {"embedding_model": EMBEDDING_MODEL}
 
 
-# Only the finished file remains after a successful save.
-def test_save_leaves_no_temporary_file(tmp_path):
-    path = tmp_path / "knowledge_base.json"
+# Each point keeps its chunk's fields and vector, under an ID made from the chunk ID.
+def test_store_saves_each_chunk_with_its_vector(qdrant):
+    embedded_chunks = make_embedded_chunks(3)
 
-    save_knowledge_base(make_embedded_chunks(), path)
+    store_knowledge_base(embedded_chunks, qdrant)
 
-    assert list(tmp_path.iterdir()) == [path]
-
-
-# If the final swap fails, the old file survives and the temporary file is removed.
-def test_failed_save_keeps_previous_file(tmp_path, monkeypatch):
-    path = tmp_path / "knowledge_base.json"
-    path.write_text("previous", encoding="utf-8")
-
-    def fail(self, target):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(type(path), "replace", fail)
-
-    with pytest.raises(DocumentStoreError, match="disk full") as error:
-        save_knowledge_base(make_embedded_chunks(), path)
-
-    assert str(path) in str(error.value)
-    assert path.read_text(encoding="utf-8") == "previous"
-    assert list(tmp_path.iterdir()) == [path]
+    points = stored_points(qdrant)
+    assert [point.id for point in points] == [
+        point_id(embedded.chunk.id) for embedded in embedded_chunks
+    ]
+    assert [point.payload for point in points] == [
+        embedded.chunk.model_dump() for embedded in embedded_chunks
+    ]
+    assert [point.vector for point in points] == [
+        embedded.embedding for embedded in embedded_chunks
+    ]
 
 
-# A directory that can't be created gives the same clear error.
-def test_save_to_impossible_directory_raises_clear_error(tmp_path):
-    blocker = tmp_path / "file.txt"
-    blocker.write_text("not a directory", encoding="utf-8")
+# A chunk ID always gives the same UUID, and different chunks get different ones.
+def test_point_ids_are_stable_uuids():
+    first = point_id("article:0")
 
-    with pytest.raises(DocumentStoreError, match="Cannot save"):
-        save_knowledge_base(make_embedded_chunks(), blocker / "knowledge_base.json")
+    assert uuid.UUID(first).version == 5
+    assert point_id("article:0") == first
+    assert point_id("article:1") != first
 
 
-# The script writes the file and says where it went.
-def test_main_saves_knowledge_base(tmp_path, capsys, fake_model):
+# A rerun replaces the collection, so chunks that no longer exist don't linger.
+def test_store_replaces_previous_collection(qdrant):
+    store_knowledge_base(make_embedded_chunks(3), qdrant)
+
+    store_knowledge_base(make_embedded_chunks(1), qdrant)
+
+    assert [point.payload["id"] for point in stored_points(qdrant)] == ["article:0"]
+
+
+# With nothing to store, the collection is still replaced and left empty.
+def test_store_with_no_chunks_leaves_empty_collection(qdrant):
+    store_knowledge_base(make_embedded_chunks(2), qdrant)
+
+    store_knowledge_base([], qdrant)
+
+    assert qdrant.count(COLLECTION_NAME).count == 0
+
+
+# A Qdrant failure, such as the server not running, gives a clear error.
+def test_store_failure_raises_clear_error(qdrant, monkeypatch):
+    monkeypatch.setattr(qdrant, "delete_collection", fail_to_connect)
+
+    with pytest.raises(
+        DocumentStoreError,
+        match=f"Cannot store chunks in the {COLLECTION_NAME} .*Connection refused",
+    ):
+        store_knowledge_base(make_embedded_chunks(), qdrant)
+
+
+# A malformed QDRANT_URL is a clear error rather than a traceback.
+def test_bad_qdrant_url_raises_clear_error(monkeypatch):
+    monkeypatch.setattr(ingest, "QDRANT_URL", "not a url")
+
+    with pytest.raises(DocumentStoreError, match="Qdrant client for not a url"):
+        get_qdrant_client()
+
+
+# The script stores the chunks in Qdrant and says where they went.
+def test_main_stores_knowledge_base(tmp_path, capsys, fake_model, qdrant):
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
-    output = tmp_path / "output.json"
 
-    assert main(tmp_path, output) == 0
+    assert main(tmp_path) == 0
 
-    saved = KnowledgeBase.model_validate_json(output.read_text(encoding="utf-8"))
-    assert [item.chunk.id for item in saved.chunks] == ["article:0"]
-    assert f"Saved 1 chunks to {output}" in capsys.readouterr().out
+    assert [point.payload["id"] for point in stored_points(qdrant)] == ["article:0"]
+    assert f"Stored 1 chunks in the {COLLECTION_NAME} collection" in (
+        capsys.readouterr().out
+    )
 
 
-# A failed run exits before saving, so the last good file stays in place.
-def test_main_keeps_previous_file_when_embedding_fails(tmp_path, monkeypatch):
+# A failed run exits before storing, so the last good collection stays in place.
+def test_main_keeps_previous_collection_when_embedding_fails(
+    tmp_path, monkeypatch, qdrant
+):
     def fail():
         raise DocumentEmbeddingError("Cannot load the model")
 
     monkeypatch.setattr(ingest, "get_embedding_model", fail)
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
-    output = tmp_path / "output.json"
-    output.write_text("previous", encoding="utf-8")
+    store_knowledge_base(make_embedded_chunks(2), qdrant)
 
-    assert main(tmp_path, output) == 1
+    assert main(tmp_path) == 1
 
-    assert output.read_text(encoding="utf-8") == "previous"
+    assert qdrant.count(COLLECTION_NAME).count == 2
 
 
-# An encoding failure is a clear error, not a traceback, and keeps the last good file.
-def test_main_reports_encoding_failure_and_keeps_file(tmp_path, capsys, monkeypatch):
+# An encoding failure is a clear error, not a traceback, and keeps the collection.
+def test_main_reports_encoding_failure_and_keeps_collection(
+    tmp_path, capsys, monkeypatch, qdrant
+):
     def fail(texts, show_progress_bar):
         raise RuntimeError("out of memory")
 
     model = types.SimpleNamespace(encode=fail)
     monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
-    output = tmp_path / "output.json"
-    output.write_text("previous", encoding="utf-8")
+    store_knowledge_base(make_embedded_chunks(2), qdrant)
 
-    assert main(tmp_path, output) == 1
+    assert main(tmp_path) == 1
 
     assert "out of memory" in capsys.readouterr().err
-    assert output.read_text(encoding="utf-8") == "previous"
+    assert qdrant.count(COLLECTION_NAME).count == 2
 
 
-# NaN vectors must not replace a good file with one that can't be read back.
-def test_main_rejects_nan_vectors_and_keeps_file(tmp_path, capsys, monkeypatch):
+# NaN vectors must not replace a good collection with one that can't be searched.
+def test_main_rejects_nan_vectors_and_keeps_collection(
+    tmp_path, capsys, monkeypatch, qdrant
+):
     model = types.SimpleNamespace(
         encode=lambda texts, show_progress_bar: np.full(
             (len(texts), EMBEDDING_DIMENSIONS), float("nan")
@@ -817,21 +856,19 @@ def test_main_rejects_nan_vectors_and_keeps_file(tmp_path, capsys, monkeypatch):
     )
     monkeypatch.setattr(ingest, "get_embedding_model", lambda: model)
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
-    output = tmp_path / "output.json"
-    output.write_text("previous", encoding="utf-8")
+    store_knowledge_base(make_embedded_chunks(2), qdrant)
 
-    assert main(tmp_path, output) == 1
+    assert main(tmp_path) == 1
 
     assert "non-finite" in capsys.readouterr().err
-    assert output.read_text(encoding="utf-8") == "previous"
+    assert qdrant.count(COLLECTION_NAME).count == 2
 
 
 # A storage failure is reported the same way as the script's other failures.
-def test_main_reports_save_errors(tmp_path, capsys, fake_model):
+def test_main_reports_store_errors(tmp_path, capsys, monkeypatch, fake_model, qdrant):
+    monkeypatch.setattr(qdrant, "delete_collection", fail_to_connect)
     (tmp_path / "article.md").write_text("# Article\n\nSome text.\n", encoding="utf-8")
-    blocker = tmp_path / "file.txt"
-    blocker.write_text("not a directory", encoding="utf-8")
 
-    assert main(tmp_path, blocker / "output.json") == 1
+    assert main(tmp_path) == 1
 
-    assert "Cannot save" in capsys.readouterr().err
+    assert "Cannot store chunks" in capsys.readouterr().err

@@ -1,9 +1,10 @@
-"""Chunk and embed the articles in knowledge_base/ and save them to a JSON file.
+"""Chunk and embed the articles in knowledge_base/ and store them in Qdrant.
 
-Each run replaces data/knowledge_base.json and prints a sample of the chunks.
+Each run replaces the knowledge_base collection and prints a sample of the chunks.
 
-This runs on its own and doesn't import or need the FastAPI app. The first run
-downloads the embedding model from Hugging Face, then uses a local cache.
+This runs on its own and doesn't import or need the FastAPI app, but Qdrant must be
+running. The first run downloads the embedding model from Hugging Face, then uses a
+local cache.
 
 Run it from the repo root with:
 
@@ -11,18 +12,24 @@ Run it from the repo root with:
 """
 
 import math
+import os
 import re
 import sys
+import uuid
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import BaseModel
+from qdrant_client import QdrantClient, models
 from tokenizers import Encoding, Tokenizer
 
 KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge_base"
-KNOWLEDGE_BASE_FILE = (
-    Path(__file__).resolve().parents[1] / "data" / "knowledge_base.json"
-)
+
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
+COLLECTION_NAME = "knowledge_base"
+# Point IDs are made from chunk IDs within this namespace, so a chunk gets the same ID
+# on every run. Any fixed UUID works, as long as it stays the same.
+POINT_ID_NAMESPACE = uuid.UUID("c3830e34-8645-48f4-baa0-d72730938742")
 
 TITLE_PATTERN = re.compile(r"#\s+(\S.*?)\s*")
 HEADING_PATTERN = re.compile(r"(#{1,6})\s+(\S.*?)\s*")
@@ -72,17 +79,6 @@ class Chunk(BaseModel):
 class EmbeddedChunk(BaseModel):
     chunk: Chunk
     embedding: list[float]
-
-
-class KnowledgeBaseMetadata(BaseModel):
-    embedding_model: str
-    embedding_dimensions: int
-    chunk_count: int
-
-
-class KnowledgeBase(BaseModel):
-    metadata: KnowledgeBaseMetadata
-    chunks: list[EmbeddedChunk]
 
 
 class DocumentLoadError(Exception):
@@ -341,7 +337,7 @@ def generate_embeddings(chunks: list[Chunk]) -> list[EmbeddedChunk]:
                 f"{chunk.chunk_index} of {chunk.source}, but got {len(vector)}"
             )
         embedding = vector.tolist()
-        # NaN would be saved as null, which makes the whole file impossible to read back.
+        # Qdrant can't compare NaN or infinity, so searches against this chunk would break.
         if not all(math.isfinite(value) for value in embedding):
             raise DocumentEmbeddingError(
                 f"Found non-finite values in the embedding for chunk "
@@ -352,43 +348,64 @@ def generate_embeddings(chunks: list[Chunk]) -> list[EmbeddedChunk]:
     return embedded_chunks
 
 
-def save_knowledge_base(
-    embedded_chunks: list[EmbeddedChunk], path: Path = KNOWLEDGE_BASE_FILE
-) -> None:
-    """Replace the file at path with the given chunks and the embedding metadata."""
-    knowledge_base = KnowledgeBase(
-        metadata=KnowledgeBaseMetadata(
-            embedding_model=EMBEDDING_MODEL,
-            embedding_dimensions=EMBEDDING_DIMENSIONS,
-            chunk_count=len(embedded_chunks),
-        ),
-        chunks=embedded_chunks,
-    )
+def point_id(chunk_id: str) -> str:
+    """Turn a chunk ID into a UUID, since Qdrant only accepts integers and UUIDs."""
+    return str(uuid.uuid5(POINT_ID_NAMESPACE, chunk_id))
 
-    # Writing beside the target and then swapping means a failure can't leave a
-    # half-written file or lose the previous one.
-    temporary_path = path.with_name(f"{path.name}.tmp")
+
+def get_qdrant_client() -> QdrantClient:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            temporary_path.write_text(
-                knowledge_base.model_dump_json(indent=2), encoding="utf-8"
-            )
-            temporary_path.replace(path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-    except OSError as error:
-        raise DocumentStoreError(f"Cannot save {path}: {error}") from error
+        return QdrantClient(url=QDRANT_URL)
+    except Exception as error:
+        raise DocumentStoreError(
+            f"Cannot create a Qdrant client for {QDRANT_URL}: {error}"
+        ) from error
 
 
-def main(
-    directory: Path = KNOWLEDGE_BASE_DIR, output_path: Path = KNOWLEDGE_BASE_FILE
-) -> int:
+def store_knowledge_base(
+    embedded_chunks: list[EmbeddedChunk],
+    client: QdrantClient,
+    collection_name: str = COLLECTION_NAME,
+) -> None:
+    """Replace the collection with a new one holding only the given chunks."""
+    points = [
+        models.PointStruct(
+            id=point_id(embedded.chunk.id),
+            vector=embedded.embedding,
+            payload=embedded.chunk.model_dump(),
+        )
+        for embedded in embedded_chunks
+    ]
+
+    try:
+        # Starting from an empty collection means chunks from deleted or shortened
+        # articles can't linger. Until the upload finishes, searches find nothing.
+        client.delete_collection(collection_name)
+        client.create_collection(
+            collection_name,
+            vectors_config=models.VectorParams(
+                size=EMBEDDING_DIMENSIONS, distance=models.Distance.COSINE
+            ),
+            # Searches must embed queries with the same model, so record which one
+            # made these vectors.
+            metadata={"embedding_model": EMBEDDING_MODEL},
+        )
+        # Qdrant rejects an upload with no points.
+        if points:
+            client.upsert(collection_name, points=points, wait=True)
+    except Exception as error:
+        raise DocumentStoreError(
+            f"Cannot store chunks in the {collection_name} Qdrant collection: {error}"
+        ) from error
+
+
+def main(directory: Path = KNOWLEDGE_BASE_DIR) -> int:
     try:
         documents = load_documents(directory)
         chunks = chunk_documents(documents)
         embedded_chunks = generate_embeddings(chunks)
-        save_knowledge_base(embedded_chunks, output_path)
+        # Stored last, so a failure in any earlier step leaves the collection as it was.
+        store_knowledge_base(embedded_chunks, get_qdrant_client())
     except (
         DocumentLoadError,
         DocumentChunkError,
@@ -406,7 +423,10 @@ def main(
             f"--- {count_tokens(text)} tokens, "
             f"{len(embedded.embedding)} dimensions ---\n{text}\n"
         )
-    print(f"Saved {len(embedded_chunks)} chunks to {output_path}")
+    print(
+        f"Stored {len(embedded_chunks)} chunks in the {COLLECTION_NAME} collection "
+        f"at {QDRANT_URL}"
+    )
     return 0
 
 
