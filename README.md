@@ -228,6 +228,14 @@ To search only one article, add `--document-id` with the article's file name in 
 uv run python -m scripts.search "I was charged twice" --document-id cancellation
 ```
 
+To measure how well search finds the right articles, run the following. It searches for each of the 20 labeled questions in `eval/retrieval_cases.json`, ranks articles by their best-matching chunk, and judges each question on its first 5 different articles. It reports Hit@1, Hit@3, Hit@5 and Mean Reciprocal Rank overall, by category and per question, then lists any question with no relevant article in its top 5. A question with several relevant articles counts as a hit if any of them appears. It doesn't use FastAPI or Claude:
+
+```bash
+uv run python -m scripts.evaluate_retrieval
+```
+
+There are only 8 articles, so any 5 of them cover most of the knowledge base, and even a random order would reach about 0.77 Hit@5 on this dataset. Hit@1 and MRR say more about search quality.
+
 ## Configuration
 
 | Setting             | Required             | Purpose                                                                                                                    |
@@ -258,6 +266,7 @@ knowledge_base/        # Markdown help articles
 qdrant_storage/        # Qdrant's data from Docker, not committed
 scripts/
 ├── check_real_api.py  # Opt-in check against real Claude
+├── evaluate_retrieval.py  # Scores search against the labeled questions in eval/
 ├── ingest.py          # Chunks, embeds and stores the help articles in Qdrant
 └── search.py          # Searches the help articles from the command line
 tests/
