@@ -252,6 +252,8 @@ app/
     ├── database.py    # Database engine and sessions
     ├── models.py      # Tables
     └── seed.py        # Fake data
+eval/
+└── retrieval_cases.json  # Customer questions labeled with the articles that answer them
 knowledge_base/        # Markdown help articles
 qdrant_storage/        # Qdrant's data from Docker, not committed
 scripts/

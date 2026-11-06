@@ -1,0 +1,150 @@
+[
+  {
+    "id": "rc-01",
+    "question": "How do I download last month's invoice as a PDF?",
+    "relevant_document_ids": ["invoices"],
+    "category": "direct"
+  },
+  {
+    "id": "rc-02",
+    "question": "How do I set up two-step verification on my account?",
+    "relevant_document_ids": ["account-settings"],
+    "category": "direct"
+  },
+  {
+    "id": "rc-03",
+    "question": "One of my payment attempts failed with processing_error. What does that mean, and what should I do?",
+    "relevant_document_ids": ["failed-payments"],
+    "category": "direct"
+  },
+  {
+    "id": "rc-04",
+    "question": "Once a refund is issued, how long does it take to show up on my card?",
+    "relevant_document_ids": ["refunds-and-duplicate-charges"],
+    "category": "direct"
+  },
+  {
+    "id": "rc-05",
+    "question": "If I cancel on my renewal date, will I still be charged for the next period?",
+    "relevant_document_ids": ["cancellation"],
+    "category": "direct"
+  },
+  {
+    "id": "rc-06",
+    "question": "I forgot my password. How do I reset it?",
+    "relevant_document_ids": ["troubleshooting"],
+    "category": "direct"
+  },
+  {
+    "id": "rc-07",
+    "question": "I'm leaving the company. How do I make a coworker the main person in charge of our Flowdesk account?",
+    "relevant_document_ids": ["account-settings"],
+    "category": "paraphrased"
+  },
+  {
+    "id": "rc-08",
+    "question": "My card got declined. Will you have another go at charging it without me doing anything, and how many tries do I get?",
+    "relevant_document_ids": ["failed-payments"],
+    "category": "paraphrased"
+  },
+  {
+    "id": "rc-09",
+    "question": "I hit cancel by accident. How do I take it back?",
+    "relevant_document_ids": ["cancellation"],
+    "category": "paraphrased"
+  },
+  {
+    "id": "rc-10",
+    "question": "My calendar connection keeps dropping and asking me to approve access again. How do I make it stick?",
+    "relevant_document_ids": ["troubleshooting"],
+    "category": "paraphrased"
+  },
+  {
+    "id": "rc-11",
+    "question": "Why did I get a second, smaller bill this month right after moving to a bigger plan?",
+    "relevant_document_ids": [
+      "subscription-changes",
+      "invoices",
+      "refunds-and-duplicate-charges"
+    ],
+    "category": "paraphrased"
+  },
+  {
+    "id": "rc-12",
+    "question": "Why can't my team open or edit our projects anymore?",
+    "relevant_document_ids": [
+      "troubleshooting",
+      "failed-payments",
+      "cancellation",
+      "account-settings"
+    ],
+    "category": "ambiguous"
+  },
+  {
+    "id": "rc-13",
+    "question": "There are two Flowdesk payments on my card statement this month. Did you bill me twice?",
+    "relevant_document_ids": [
+      "refunds-and-duplicate-charges",
+      "failed-payments",
+      "invoices"
+    ],
+    "category": "ambiguous"
+  },
+  {
+    "id": "rc-14",
+    "question": "How do I change my email address?",
+    "relevant_document_ids": ["account-settings"],
+    "category": "ambiguous"
+  },
+  {
+    "id": "rc-15",
+    "question": "If we stop using Flowdesk partway through what we've paid for, do we get money back for the unused time?",
+    "relevant_document_ids": [
+      "refunds-and-duplicate-charges",
+      "cancellation",
+      "account-settings"
+    ],
+    "category": "ambiguous"
+  },
+  {
+    "id": "rc-16",
+    "question": "We paid for the annual plan 10 days ago and want to leave. How do I cancel and get our money back?",
+    "relevant_document_ids": ["cancellation", "refunds-and-duplicate-charges"],
+    "category": "multi-document"
+  },
+  {
+    "id": "rc-17",
+    "question": "I'm on the Starter plan and think I was charged twice. What should I include when I report it, and how soon will support reply?",
+    "relevant_document_ids": [
+      "refunds-and-duplicate-charges",
+      "support-tickets"
+    ],
+    "category": "multi-document"
+  },
+  {
+    "id": "rc-18",
+    "question": "We're on Business and an automation rule our whole team relies on stopped running. What should I check, and how fast will support respond if I can't fix it?",
+    "relevant_document_ids": ["troubleshooting", "support-tickets"],
+    "category": "multi-document"
+  },
+  {
+    "id": "rc-19",
+    "question": "We're on Pro monthly and want to switch to yearly billing. What will the first yearly charge be, and how do we stop the bank declining it?",
+    "relevant_document_ids": [
+      "subscription-changes",
+      "invoices",
+      "failed-payments"
+    ],
+    "category": "multi-document"
+  },
+  {
+    "id": "rc-20",
+    "question": "I lost the phone with my authenticator app and can't sign in. How do I get back into my account, and how long will support take?",
+    "relevant_document_ids": [
+      "troubleshooting",
+      "account-settings",
+      "support-tickets"
+    ],
+    "category": "multi-document"
+  }
+]
