@@ -192,7 +192,7 @@ uv run pytest
 
 The tests need no API key and make no real API calls. They use temporary databases, a fake LLM service to test the routes, and a fake HTTP layer to test the real service and SDK together.
 
-The chunking tests use the real `all-MiniLM-L6-v2` tokenizer so their token counts match the embedding model. The first run downloads it from Hugging Face, which needs internet access, and later runs use a local cache. The embedding tests use a fake model, so they don't download or load the real one. The storage tests use Qdrant's in-memory mode, so they don't need Docker and never touch your Qdrant data.
+The chunking tests use the real `all-MiniLM-L6-v2` tokenizer so their token counts match the embedding model. The first run downloads it from Hugging Face, which needs internet access, and later runs use a local cache. The embedding and search tests use a fake model, so they don't download or load the real one. The storage and search tests use Qdrant's in-memory mode, so they don't need Docker and never touch your Qdrant data.
 
 To check the demo scenarios against real Claude, run:
 
@@ -220,6 +220,12 @@ To see what a search finds, pass one or more queries in quotes. Each result show
 
 ```bash
 uv run python -m scripts.search "I was charged twice" "How do I cancel my subscription?"
+```
+
+To search only one article, add `--document-id` with the article's file name in `knowledge_base/`, without `.md`. An ID that matches no article gives no results:
+
+```bash
+uv run python -m scripts.search "I was charged twice" --document-id cancellation
 ```
 
 ## Configuration

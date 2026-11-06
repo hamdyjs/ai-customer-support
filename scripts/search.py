@@ -6,7 +6,10 @@ queries in quotes, from the repo root:
     uv run python -m scripts.search "I was charged twice" "How do I cancel?"
 
 Add --limit to change how many results each query shows, and --full to print each
-result's whole text instead of a short preview.
+result's whole text instead of a short preview. Add --document-id to search only one
+article, using its file name in knowledge_base/ without the .md:
+
+    uv run python -m scripts.search "I was charged twice" --document-id cancellation
 """
 
 import argparse
@@ -50,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--full", action="store_true", help="print each result's whole text"
     )
+    parser.add_argument(
+        "--document-id",
+        help="only search this article, by its file name without .md, "
+        "such as cancellation",
+    )
     args = parser.parse_args(argv)
     if args.limit < 1:
         parser.error("--limit must be at least 1")
@@ -57,8 +65,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         client = get_qdrant_client()
         for query in args.queries:
-            results = search_knowledge_base(client, query, args.limit)
-            print(f"\n{query!r}")
+            results = search_knowledge_base(
+                client, query, args.limit, document_id=args.document_id
+            )
+            if args.document_id is None:
+                print(f"\n{query!r}")
+            else:
+                print(f"\n{query!r} in {args.document_id}")
             if not results:
                 print("  No results")
             for result in results:
