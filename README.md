@@ -236,6 +236,10 @@ uv run python -m scripts.evaluate_retrieval
 
 There are only 8 articles, so any 5 of them cover most of the knowledge base, and even a random order would reach about 0.77 Hit@5 on this dataset. Hit@1 and MRR say more about search quality.
 
+The same run then evaluates chunks for the 10 questions that also have `answer_chunk_ids`. It takes the top 5 chunks exactly as search returns them, so several chunks can come from one article. Only chunks labeled as answering the question count as relevant. Chunks in `mention_chunk_ids` only mention the topic or link to the answer, so they count as irrelevant, but the report marks them. It reports Hit@1, Hit@3, Hit@5, Precision@3, Precision@5 and MRR. It then lists questions where an irrelevant chunk ranks above an answer, questions with no answer chunk in the top 5, and which answer chunks were found for multi-document questions. Precision divides by the number of places, so a question with one answer chunk can't score above 0.20 for Precision@5. The report shows the best possible scores for comparison.
+
+The chunk labels use the IDs that `scripts/ingest.py` gives chunks, so changing how articles are chunked means relabeling them. A test checks that every labeled chunk still exists.
+
 ## Configuration
 
 | Setting             | Required             | Purpose                                                                                                                    |
@@ -261,7 +265,7 @@ app/
     ├── models.py      # Tables
     └── seed.py        # Fake data
 eval/
-└── retrieval_cases.json  # Customer questions labeled with the articles that answer them
+└── retrieval_cases.json  # Customer questions labeled with the articles, and some with the chunks, that answer them
 knowledge_base/        # Markdown help articles
 qdrant_storage/        # Qdrant's data from Docker, not committed
 scripts/

@@ -3,7 +3,15 @@
     "id": "rc-01",
     "question": "How do I download last month's invoice as a PDF?",
     "relevant_document_ids": ["invoices"],
-    "category": "direct"
+    "category": "direct",
+    "answer_chunk_ids": ["invoices:1"],
+    "mention_chunk_ids": [
+      "invoices:0",
+      "invoices:15",
+      "account-settings:13",
+      "support-tickets:15",
+      "cancellation:8"
+    ]
   },
   {
     "id": "rc-02",
@@ -27,13 +35,22 @@
     "id": "rc-05",
     "question": "If I cancel on my renewal date, will I still be charged for the next period?",
     "relevant_document_ids": ["cancellation"],
-    "category": "direct"
+    "category": "direct",
+    "answer_chunk_ids": ["cancellation:4"],
+    "mention_chunk_ids": [
+      "cancellation:0",
+      "cancellation:2",
+      "cancellation:3",
+      "refunds-and-duplicate-charges:6"
+    ]
   },
   {
     "id": "rc-06",
     "question": "I forgot my password. How do I reset it?",
     "relevant_document_ids": ["troubleshooting"],
-    "category": "direct"
+    "category": "direct",
+    "answer_chunk_ids": ["troubleshooting:3"],
+    "mention_chunk_ids": ["account-settings:4", "account-settings:0"]
   },
   {
     "id": "rc-07",
@@ -45,7 +62,15 @@
     "id": "rc-08",
     "question": "My card got declined. Will you have another go at charging it without me doing anything, and how many tries do I get?",
     "relevant_document_ids": ["failed-payments"],
-    "category": "paraphrased"
+    "category": "paraphrased",
+    "answer_chunk_ids": ["failed-payments:5", "failed-payments:6"],
+    "mention_chunk_ids": [
+      "failed-payments:1",
+      "failed-payments:2",
+      "failed-payments:4",
+      "failed-payments:7",
+      "account-settings:14"
+    ]
   },
   {
     "id": "rc-09",
@@ -57,7 +82,16 @@
     "id": "rc-10",
     "question": "My calendar connection keeps dropping and asking me to approve access again. How do I make it stick?",
     "relevant_document_ids": ["troubleshooting"],
-    "category": "paraphrased"
+    "category": "paraphrased",
+    "answer_chunk_ids": ["troubleshooting:15", "troubleshooting:16"],
+    "mention_chunk_ids": [
+      "account-settings:12",
+      "troubleshooting:11",
+      "troubleshooting:17",
+      "troubleshooting:18",
+      "support-tickets:5",
+      "cancellation:12"
+    ]
   },
   {
     "id": "rc-11",
@@ -67,7 +101,18 @@
       "invoices",
       "refunds-and-duplicate-charges"
     ],
-    "category": "paraphrased"
+    "category": "paraphrased",
+    "answer_chunk_ids": [
+      "subscription-changes:6",
+      "subscription-changes:16",
+      "invoices:8",
+      "refunds-and-duplicate-charges:1"
+    ],
+    "mention_chunk_ids": [
+      "subscription-changes:5",
+      "subscription-changes:7",
+      "subscription-changes:9"
+    ]
   },
   {
     "id": "rc-12",
@@ -88,13 +133,39 @@
       "failed-payments",
       "invoices"
     ],
-    "category": "ambiguous"
+    "category": "ambiguous",
+    "answer_chunk_ids": [
+      "refunds-and-duplicate-charges:1",
+      "refunds-and-duplicate-charges:2",
+      "refunds-and-duplicate-charges:3",
+      "failed-payments:3",
+      "failed-payments:18",
+      "invoices:7",
+      "invoices:8"
+    ],
+    "mention_chunk_ids": [
+      "refunds-and-duplicate-charges:0",
+      "refunds-and-duplicate-charges:4",
+      "refunds-and-duplicate-charges:12",
+      "failed-payments:0",
+      "invoices:6",
+      "subscription-changes:6"
+    ]
   },
   {
     "id": "rc-14",
     "question": "How do I change my email address?",
     "relevant_document_ids": ["account-settings"],
-    "category": "ambiguous"
+    "category": "ambiguous",
+    "answer_chunk_ids": ["account-settings:2", "account-settings:15"],
+    "mention_chunk_ids": [
+      "account-settings:0",
+      "invoices:12",
+      "troubleshooting:23",
+      "support-tickets:9",
+      "support-tickets:15",
+      "support-tickets:16"
+    ]
   },
   {
     "id": "rc-15",
@@ -110,7 +181,16 @@
     "id": "rc-16",
     "question": "We paid for the annual plan 10 days ago and want to leave. How do I cancel and get our money back?",
     "relevant_document_ids": ["cancellation", "refunds-and-duplicate-charges"],
-    "category": "multi-document"
+    "category": "multi-document",
+    "answer_chunk_ids": ["cancellation:1", "refunds-and-duplicate-charges:7"],
+    "mention_chunk_ids": [
+      "refunds-and-duplicate-charges:6",
+      "cancellation:5",
+      "cancellation:2",
+      "refunds-and-duplicate-charges:0",
+      "support-tickets:1",
+      "support-tickets:2"
+    ]
   },
   {
     "id": "rc-17",
@@ -145,6 +225,19 @@
       "account-settings",
       "support-tickets"
     ],
-    "category": "multi-document"
+    "category": "multi-document",
+    "answer_chunk_ids": [
+      "troubleshooting:4",
+      "account-settings:5",
+      "support-tickets:2",
+      "support-tickets:6"
+    ],
+    "mention_chunk_ids": [
+      "troubleshooting:3",
+      "support-tickets:3",
+      "support-tickets:4",
+      "support-tickets:5",
+      "support-tickets:8"
+    ]
   }
 ]
