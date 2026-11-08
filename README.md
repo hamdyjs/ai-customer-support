@@ -203,7 +203,7 @@ To check the demo scenarios against real Claude, run:
 uv run python -m scripts.check_real_api
 ```
 
-This uses your API key and costs about a cent. It runs on a temporary database, so `app.db` isn't touched. Claude's wording varies, so it only checks for key facts, and a failure means the reply is worth reading, not necessarily that something is broken.
+This uses your API key and costs a couple of cents. It runs on a temporary database, so `app.db` isn't touched. It also checks grounding: a policy the help articles don't cover, a detail the data doesn't include, a failed search, and instructions planted in a help article. The scenarios that search need Qdrant running with the articles stored. Claude's wording varies, so it only checks for key facts, and a failure means the reply is worth reading, not necessarily that something is broken.
 
 To chunk and embed the Markdown articles in `knowledge_base/` and store them in Qdrant, first start Qdrant with [Docker](https://www.docker.com/). Its data is kept in `qdrant_storage/`:
 
