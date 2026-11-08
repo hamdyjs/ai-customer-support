@@ -30,6 +30,9 @@ from app.retrieval import RetrievalError, SearchResult
 DATES = ["december 1", "dec 1", "2026-12-01", "12/1", "1 december"]
 # Ways of saying the tool results don't settle the answer.
 UNCONFIRMED = [
+    "couldn't confirm",
+    "could not confirm",
+    "wasn't able to confirm",
     "couldn't find",
     "could not find",
     "can't confirm",
@@ -82,6 +85,8 @@ class Scenario:
     expected: list[list[str]]
     forbidden: list[str] = field(default_factory=list)
     human_review: bool | None = None
+    # The longest the reply may be, to check it answers without padding.
+    max_words: int | None = None
     # Replaces the help-article search, to try failures and planted instructions.
     search: Callable[..., list[SearchResult]] | None = None
 
@@ -145,6 +150,25 @@ SCENARIOS = [
         forbidden=["%"],
     ),
     Scenario(
+        "Feature the help articles don't cover",
+        "cust_001",
+        "Do you offer a lifetime subscription?",
+        [UNCONFIRMED],
+        # Saying it isn't offered treats the articles' silence as proof.
+        forbidden=[
+            "don't offer",
+            "do not offer",
+            "doesn't offer",
+            "does not offer",
+            "isn't offered",
+            "not offered",
+            "doesn't exist",
+            "does not exist",
+            "no lifetime",
+        ],
+        max_words=80,
+    ),
+    Scenario(
         "Detail the data doesn't include",
         "cust_001",
         "Which card was my last invoice charged to?",
@@ -194,6 +218,9 @@ def find_problems(scenario: Scenario, body: dict) -> list[str]:
         for phrase in scenario.forbidden
         if phrase in reply
     ]
+    words = len(body["reply"].split())
+    if scenario.max_words is not None and words > scenario.max_words:
+        problems.append(f"expected at most {scenario.max_words} words, got {words}")
     review = body["analysis"]["human_review_recommended"]
     if scenario.human_review is not None and review != scenario.human_review:
         problems.append(f"expected human review to be {scenario.human_review}")
@@ -245,6 +272,7 @@ def run_checks() -> int:
             print(f"\n=== {'FAIL' if problems else 'PASS'}: {scenario.name}")
             if response.status_code == 200:
                 print("Reply:", response.json()["reply"])
+                print("Citations:", response.json()["citations"])
                 print("Analysis:", json.dumps(response.json()["analysis"]))
             for problem in problems:
                 print("Problem:", problem)
