@@ -20,6 +20,7 @@ from app.db.models import (
     TicketPriority,
     TicketStatus,
 )
+from app.tracing import trace_tool
 
 
 class ToolResult(BaseModel):
@@ -250,8 +251,16 @@ def run_tool(
         query = tool_input.get("query")
         if not isinstance(query, str) or not query.strip():
             raise ValueError("search_knowledge_base needs a query")
-        return to_json(search_knowledge_base(query)).decode()
+        with trace_tool(name) as tool:
+            passages = search_knowledge_base(query)
+            chunk_ids = [passage.id for passage in passages]
+            tool.update(
+                metadata={"chunk_count": len(chunk_ids), "chunk_ids": chunk_ids}
+            )
+        return to_json(passages).decode()
     if name not in CUSTOMER_TOOLS:
         raise ValueError(f"Unknown tool: {name}")
     # Claude's input is ignored, so the customer always comes from our code.
-    return to_json(CUSTOMER_TOOLS[name](session, customer_id)).decode()
+    with trace_tool(name):
+        records = CUSTOMER_TOOLS[name](session, customer_id)
+    return to_json(records).decode()

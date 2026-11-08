@@ -24,29 +24,29 @@ def tool_call(name, tool_id="toolu_1", tool_input=None):
     return {"type": "tool_use", "id": tool_id, "name": name, "input": tool_input or {}}
 
 
-def message_response(content, stop_reason="end_turn"):
+def message_response(content, stop_reason="end_turn", usage=None, model=MODEL):
     return httpx2.Response(
         200,
         json={
             "id": "msg_test",
             "type": "message",
             "role": "assistant",
-            "model": MODEL,
+            "model": model,
             "content": content,
             "stop_reason": stop_reason,
             "stop_sequence": None,
-            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "usage": usage or {"input_tokens": 1, "output_tokens": 1},
         },
     )
 
 
-def tool_response(*calls):
-    return message_response(list(calls), stop_reason="tool_use")
+def tool_response(*calls, usage=None):
+    return message_response(list(calls), stop_reason="tool_use", usage=usage)
 
 
-def reply_response(reply="You paid $49.00.", citations=()):
+def reply_response(reply="You paid $49.00.", citations=(), usage=None):
     body = {"reply": reply, "citations": list(citations), "analysis": ANALYSIS}
-    return message_response([text_block(json.dumps(body))])
+    return message_response([text_block(json.dumps(body))], usage=usage)
 
 
 class FakeClaude:

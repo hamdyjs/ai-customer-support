@@ -23,6 +23,7 @@ from anthropic.types import (
     ToolParam,
     ToolResultBlockParam,
     ToolUseBlock,
+    Usage,
 )
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
@@ -33,6 +34,7 @@ from app.db.database import SessionFactory
 from app.db.models import TicketPriority
 from app.retrieval import RetrievalError
 from app.tools import TOOL_DEFINITIONS, run_tool
+from app.tracing import trace_claude_call
 
 load_dotenv()
 
@@ -302,6 +304,19 @@ def returned_chunk_ids(
     return [passage["id"] for passage in json.loads(content)]
 
 
+# A call's token counts for Langfuse, which prices each key with its built-in prices
+# for the model and adds them all up for the total. Anthropic's input_tokens leaves
+# out cached tokens, and output_tokens includes thinking, so each token is counted
+# once. The cache counts are left out when the API doesn't send them.
+def to_usage_details(usage: Usage) -> dict[str, int]:
+    details = {"input": usage.input_tokens, "output": usage.output_tokens}
+    if usage.cache_creation_input_tokens is not None:
+        details["cache_creation_input_tokens"] = usage.cache_creation_input_tokens
+    if usage.cache_read_input_tokens is not None:
+        details["cache_read_input_tokens"] = usage.cache_read_input_tokens
+    return details
+
+
 @dataclass
 class RequestUsage:
     llm_calls: int = 0
@@ -374,23 +389,28 @@ class LLMService:
         messages: list[MessageParam],
         tools: list[ToolParam] | Omit = omit,
     ) -> Message:
-        try:
-            return await self.client.messages.create(
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                output_config={
-                    "effort": "medium",
-                    "format": {
-                        "type": "json_schema",
-                        "schema": transform_schema(output_model),
+        with trace_claude_call(MODEL) as claude_call:
+            try:
+                response = await self.client.messages.create(
+                    model=MODEL,
+                    max_tokens=MAX_TOKENS,
+                    output_config={
+                        "effort": "medium",
+                        "format": {
+                            "type": "json_schema",
+                            "schema": transform_schema(output_model),
+                        },
                     },
-                },
-                system=system,
-                tools=tools,
-                messages=messages,
+                    system=system,
+                    tools=tools,
+                    messages=messages,
+                )
+            except APIError as error:
+                raise to_llm_error(error_class, error) from error
+            claude_call.update(
+                model=response.model, usage_details=to_usage_details(response.usage)
             )
-        except APIError as error:
-            raise to_llm_error(error_class, error) from error
+        return response
 
     async def analyze_question(self, question: str) -> QuestionAnalysis:
         print("\n[Analyze request]")

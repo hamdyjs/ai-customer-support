@@ -191,7 +191,12 @@ Failures are logged with their status code or stop reason, and the API request I
 
 ### Tracing
 
-With Langfuse keys in `.env`, each `POST /v1/support/messages` request is sent to [Langfuse Cloud](https://cloud.langfuse.com) as one trace, `support-message`. A trace holds only the request's duration, whether it failed, and a random request ID such as `req_3f9c...`. It never holds the question, prompts, replies, tool results, errors or any customer details, and the spans the Anthropic SDK makes for each Claude call aren't sent. A failed request, such as a `404` or `502`, is marked with the `ERROR` level, without its error message. Requests rejected before the route runs, such as a `401` or `422`, aren't traced.
+With Langfuse keys in `.env`, each `POST /v1/support/messages` request is sent to [Langfuse Cloud](https://cloud.langfuse.com) as one trace, `support-message`, with a random request ID such as `req_3f9c...`. Under it are, in order:
+
+- **`claude-call`:** a generation for each Claude call in the tool loop, with the model the API reports and that call's input and output tokens, plus its cache-write and cache-read tokens when Anthropic sends them. Langfuse prices these with its built-in prices for the model, so each call's cost and the request's total appear in Langfuse, with no price table in the app. A call includes the SDK's own retries, so its duration includes their waits.
+- **A tool observation for each tool that runs,** named after the tool, such as `get_invoices`. A `search_knowledge_base` run also has how many chunks it returned and their IDs.
+
+Every observation has its duration, and a failed one, such as a Claude call that errors, a search that fails, or the whole request returning a `404` or `502`, is marked with the `ERROR` level, without its error message. A trace never holds the question, prompts, replies, tool inputs or results, search queries, chunk text, errors or any customer details, and the spans the Anthropic SDK makes for each Claude call aren't sent. A tool call that's rejected before it runs, such as an unknown tool, isn't recorded, and neither are requests rejected before the route runs, such as a `401` or `422`, or `/v1/support/analyze` requests.
 
 Without the keys nothing is traced. Tracing runs alongside the request and never changes its response: if Langfuse is unreachable or fails, the error is logged and the request carries on.
 
