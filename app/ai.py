@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ from anthropic.types import (
 )
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlmodel import Session
 
 from app.db.database import SessionFactory
@@ -114,8 +115,22 @@ again before answering, even if you looked it up earlier in the conversation.
 Older parts of a long conversation may be left out, including the tool calls behind
 an earlier answer. Don't mention or apologize for any missing history.
 
-Your final answer has two parts. "reply" is shown to the customer. "analysis" is for
-the support team and describes the customer's message:
+Your final answer has three parts. "reply" is shown to the customer. "citations" lists
+the help-article passages behind the reply. "analysis" is for the support team.
+
+For citations, list the id of each passage that directly states a fact about Flowdesk
+in your reply, such as a policy, a time limit, or where a setting is. A passage
+directly states a fact if someone could check the fact from that passage alone. Copy
+each id exactly as search_knowledge_base returned it, and only cite passages it
+returned for the current message: to rely on one from earlier in the conversation,
+search again. Don't cite passages you only read, that are only related, or that the
+fact is inferred from. If a fact draws on several passages, cite each of them. Every
+fact about Flowdesk in the reply needs a citation. Facts about this customer come
+from the account tools and aren't cited. Leave citations empty when the reply states
+no facts from the help articles, such as a clarifying question or a failed lookup.
+Don't mention ids or citations in the reply itself.
+
+The analysis describes the customer's message:
 
 {CLASSIFICATION_RULES}
 
@@ -156,7 +171,19 @@ class QuestionAnalysis(BaseModel):
 
 class SupportReply(BaseModel):
     reply: str
+    citations: list[str] = Field(
+        description=(
+            "IDs of the help-article passages that directly state facts in reply, "
+            "such as cancellation:5. Empty if reply states none."
+        )
+    )
     analysis: QuestionAnalysis
+
+    # Claude may cite a passage more than once, so only its first mention is kept.
+    @field_validator("citations")
+    @classmethod
+    def drop_duplicate_citations(cls, citations: list[str]) -> list[str]:
+        return list(dict.fromkeys(citations))
 
 
 @dataclass
@@ -251,6 +278,21 @@ def run_tool_call(
             "is_error": True,
         }
     return {"type": "tool_result", "tool_use_id": tool_call.id, "content": content}
+
+
+# The chunk IDs a successful search sent back to Claude. Account tools return none,
+# so their records can never be cited as help articles.
+def returned_chunk_ids(
+    tool_call: ToolUseBlock, result: ToolResultBlockParam
+) -> list[str]:
+    content = result.get("content")
+    if (
+        tool_call.name != "search_knowledge_base"
+        or result.get("is_error")
+        or not isinstance(content, str)
+    ):
+        return []
+    return [passage["id"] for passage in json.loads(content)]
 
 
 @dataclass
@@ -397,6 +439,9 @@ class LLMService:
     ) -> GeneratedReply:
         turn_messages: list[MessageParam] = [{"role": "user", "content": message}]
         stored_messages: list[dict[str, Any]] = [{"role": "user", "content": message}]
+        # Every chunk searches returned during this request, which are the only
+        # ones the reply can cite.
+        retrieved_chunk_ids: set[str] = set()
         for call_number in range(1, MAX_LLM_CALLS + 1):
             response = await self._create_message(
                 ReplyError,
@@ -411,7 +456,9 @@ class LLMService:
                 {"role": "assistant", "content": to_stored_content(response)}
             )
             if response.stop_reason != "tool_use":
-                return GeneratedReply(self._read_reply(response), stored_messages)
+                return GeneratedReply(
+                    self._read_reply(response, retrieved_chunk_ids), stored_messages
+                )
 
             tool_calls = [
                 block for block in response.content if block.type == "tool_use"
@@ -427,18 +474,38 @@ class LLMService:
                     run_tool_call(tool_call, session, customer_id)
                     for tool_call in tool_calls
                 ]
+            for tool_call, result in zip(tool_calls, tool_results, strict=True):
+                retrieved_chunk_ids.update(returned_chunk_ids(tool_call, result))
             turn_messages.append({"role": "assistant", "content": response.content})
             turn_messages.append({"role": "user", "content": tool_results})
             stored_messages.append({"role": "user", "content": tool_results})
         logger.error("Claude used all %s calls without a reply", MAX_LLM_CALLS)
         raise ReplyError("No reply returned: too many tool calls")
 
-    def _read_reply(self, response: Message) -> SupportReply:
+    def _read_reply(
+        self, response: Message, retrieved_chunk_ids: set[str]
+    ) -> SupportReply:
         text = read_output_text(response, ReplyError)
         try:
-            return SupportReply.model_validate_json(text)
+            reply = SupportReply.model_validate_json(text)
         except ValidationError as error:
             raise invalid_output_error(ReplyError, response) from error
+        # A citation of anything a search didn't return this request, such as a
+        # made-up ID or an invoice, fails the reply like any other invalid output,
+        # so it's never shown as a source.
+        unretrieved = [
+            citation
+            for citation in reply.citations
+            if citation not in retrieved_chunk_ids
+        ]
+        if unretrieved:
+            logger.error(
+                "Claude cited chunks that weren't retrieved: %s request_id=%s",
+                unretrieved,
+                response._request_id,
+            )
+            raise ReplyError(f"The model returned an invalid {ReplyError.label}")
+        return reply
 
 
 @lru_cache

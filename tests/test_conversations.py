@@ -195,7 +195,7 @@ def test_failed_save_stores_nothing(pooled_engine):
         async def generate_reply(self, message, history, new_session, customer_id):
             return GeneratedReply(
                 SupportReply.model_validate(
-                    {"reply": "Paid-for reply", "analysis": ANALYSIS}
+                    {"reply": "Paid-for reply", "citations": [], "analysis": ANALYSIS}
                 ),
                 [{"not_json": object()}],
             )
@@ -512,6 +512,32 @@ def test_internal_messages_are_stored_but_not_returned(client, engine):
     assert "llm_messages" not in response.text
     assert "tool_use" not in response.text
     assert "alex@example.com" not in response.text
+
+
+# Citations come back from the message endpoint, are saved with the turn, and come
+# back the same from the history endpoint. Claude's stored answer keeps them too, so
+# a follow-up's history shows what it cited.
+def test_citations_are_returned_saved_and_in_history(client, engine, knowledge_base):
+    citations = ["failed-payments:0", "cancellation:5"]
+    use_claude(
+        tool_response(
+            tool_call("search_knowledge_base", tool_input={"query": "refunds"})
+        ),
+        reply_response("No refund.", citations=citations),
+    )
+
+    sent = send(client, "Can I get a refund?").json()
+    history = client.get(
+        f"{CONVERSATIONS_URL}/{sent['conversation_id']}", headers=auth(ALEX)
+    ).json()
+
+    with Session(engine) as session:
+        turn = session.exec(select(ConversationTurn)).one()
+    final_answer = json.loads(turn.llm_messages[-1]["content"][0]["text"])
+    assert sent["citations"] == citations
+    assert turn.citations == citations
+    assert history["turns"][0]["citations"] == citations
+    assert final_answer["citations"] == citations
 
 
 FAILURES = [

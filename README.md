@@ -8,7 +8,7 @@ The data belongs to **Flowdesk**, a fictional project management product. All cu
 
 - **Answers from real records:** Claude calls read-only tools to look up the customer's profile, subscriptions, invoices, payments and support tickets.
 - **Answers from help articles:** for how-to and policy questions, Claude searches Flowdesk's help articles, stored in Qdrant, with a query it writes itself.
-- **Returns structured output:** each answer is validated against a Pydantic model and includes a customer-facing reply, plus a category, priority, summary and human-review flag.
+- **Returns structured output:** each answer is validated against a Pydantic model and includes a customer-facing reply, the help-article chunks it cites, plus a category, priority, summary and human-review flag.
 - **Keeps conversations:** follow-up questions have the context of earlier turns, including tool calls and results, stored in SQLite.
 - **Isolates customers:** Claude can't choose whose data it sees, because the account tools take no input, the help-article search takes only a query, and the customer ID comes from the authenticated request.
 
@@ -58,7 +58,7 @@ Every `/v1` endpoint needs an `Authorization: Bearer <customer_id>` header. This
 | ------------------------------------ | --------------------------------------------------------------------------- |
 | `POST /v1/support/messages`          | Ask a question using the customer's data, in a new or existing conversation |
 | `GET /v1/support/conversations`      | List the customer's conversations                                           |
-| `GET /v1/support/conversations/{id}` | Get one conversation's questions, replies and analysis                      |
+| `GET /v1/support/conversations/{id}` | Get one conversation's questions, replies, citations and analysis           |
 | `POST /v1/support/analyze`           | Classify a question without using any customer data                         |
 | `GET /health`                        | Health check, with no authentication needed                                 |
 
@@ -74,6 +74,7 @@ curl -X POST http://127.0.0.1:8000/v1/support/messages \
 ```json
 {
   "reply": "No, you were not charged twice in October. October's invoice (inv_015, billing period Oct 1 to Nov 1, 2026) is for $19.00. There was one failed payment attempt on Oct 1 because of an expired card, and that attempt didn't charge you. The only successful charge was $19.00 on Oct 3, 2026, and the invoice is marked paid.",
+  "citations": [],
   "analysis": {
     "category": "billing",
     "priority": "low",
@@ -86,6 +87,8 @@ curl -X POST http://127.0.0.1:8000/v1/support/messages \
 ```
 
 Claude's wording varies between runs, and each conversation gets its own ID.
+
+`citations` lists the IDs of the help-article chunks that the reply's facts about Flowdesk come from, such as `refunds-and-duplicate-charges:2`, in the order Claude gave them and without repeats. It's empty when the reply uses no help articles, as above, where the answer comes from the customer's own records.
 
 ### Continue a conversation
 
@@ -162,6 +165,7 @@ The seed script creates eight customers, each with a different situation to try:
 ### Design decisions
 
 - **Customer isolation:** the account tools accept no input, so Claude has no way to ask for another customer's data. The help-article search accepts only a query and holds no customer data. Every query filters on the authenticated customer's ID. Another customer's conversation returns the same `404` as one that doesn't exist.
+- **Checked citations:** every cited chunk must have been returned by a search during the same request. A made-up ID, an account record or a chunk from an earlier turn fails the reply like any other invalid output, with a `502`, so it's never shown as a source.
 - **Failed turns aren't saved:** nothing is written until Claude has produced a valid answer, so a failure leaves a conversation unchanged and a retry starts cleanly.
 - **Valid tool sequences:** each completed exchange is stored as one row, with its tool calls and results together, so they can't be split up.
 - **History limit:** Claude sees only the 10 most recent turns (`MAX_HISTORY_TURNS` in `app/conversations.py`), which limits context growth and cost. Older turns are still stored and returned by the history endpoint.
@@ -179,7 +183,7 @@ The server console prints each step of a request, with token usage and an estima
   Tool use: get_invoices input={}
   Tool use: get_payments input={}
 [LLM call 2] stop_reason=end_turn input_tokens=3272 output_tokens=518 cache_read_tokens=0 cache_write_tokens=0
-  Text: {"reply": "...", "analysis": {...}}
+  Text: {"reply": "...", "citations": [], "analysis": {...}}
 [Request total] llm_calls=2 input_tokens=5504 output_tokens=597 cache_read_tokens=0 cache_write_tokens=0 estimated_cost=$0.000849
 ```
 

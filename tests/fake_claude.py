@@ -44,8 +44,8 @@ def tool_response(*calls):
     return message_response(list(calls), stop_reason="tool_use")
 
 
-def reply_response(reply="You paid $49.00."):
-    body = {"reply": reply, "analysis": ANALYSIS}
+def reply_response(reply="You paid $49.00.", citations=()):
+    body = {"reply": reply, "citations": list(citations), "analysis": ANALYSIS}
     return message_response([text_block(json.dumps(body))])
 
 

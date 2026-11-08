@@ -113,7 +113,12 @@ def test_thinking_is_sent_during_the_turn_but_not_stored(session):
     claude = FakeClaude(
         message_response([thinking, redacted, tool_call("get_invoices")], "tool_use"),
         message_response(
-            [thinking, text_block(json.dumps({"reply": "Hi", "analysis": ANALYSIS}))]
+            [
+                thinking,
+                text_block(
+                    json.dumps({"reply": "Hi", "citations": [], "analysis": ANALYSIS})
+                ),
+            ]
         ),
     )
 
@@ -152,7 +157,8 @@ def test_returns_the_reply_without_tools(session):
     ]
 
 
-# Every request sends a strict JSON schema with the reply and the nested analysis.
+# Every request sends a strict JSON schema with the reply, its citations and the
+# nested analysis.
 # This is what makes Claude return structured output.
 def test_requests_structured_output(session):
     claude = FakeClaude(tool_response(tool_call("get_customer")), reply_response())
@@ -164,7 +170,7 @@ def test_requests_structured_output(session):
         schema = output_format["schema"]
         analysis = schema["$defs"]["QuestionAnalysis"]
         assert output_format["type"] == "json_schema"
-        assert set(schema["properties"]) == {"reply", "analysis"}
+        assert set(schema["properties"]) == {"reply", "citations", "analysis"}
         assert schema["additionalProperties"] is False
         assert set(analysis["properties"]) == set(ANALYSIS)
         assert analysis["additionalProperties"] is False
@@ -561,17 +567,29 @@ def test_unusable_answer_raises_reply_error(session, content, stop_reason):
     [
         [],
         [text_block("You paid $49.00.")],
-        [text_block(json.dumps({"reply": "You paid $49.00."}))],
-        [text_block(json.dumps({"analysis": ANALYSIS}))],
+        [text_block(json.dumps({"reply": "You paid $49.00.", "citations": []}))],
+        [text_block(json.dumps({"citations": [], "analysis": ANALYSIS}))],
+        [text_block(json.dumps({"reply": "Hi", "analysis": ANALYSIS}))],
         [
             text_block(
                 json.dumps(
-                    {"reply": "Hi", "analysis": {**ANALYSIS, "category": "other"}}
+                    {
+                        "reply": "Hi",
+                        "citations": [],
+                        "analysis": {**ANALYSIS, "category": "other"},
+                    }
                 )
             )
         ],
     ],
-    ids=["empty", "not_json", "missing_analysis", "missing_reply", "bad_category"],
+    ids=[
+        "empty",
+        "not_json",
+        "missing_analysis",
+        "missing_reply",
+        "missing_citations",
+        "bad_category",
+    ],
 )
 def test_invalid_output_raises_reply_error(session, content):
     claude = FakeClaude(message_response(content))
@@ -685,3 +703,108 @@ def test_too_many_calls_is_logged(session, caplog):
         claude.reply(session)
 
     assert f"Claude used all {MAX_LLM_CALLS} calls" in caplog.text
+
+
+def search(query="refunds", tool_id="toolu_1"):
+    return tool_call("search_knowledge_base", tool_id, {"query": query})
+
+
+# Chunks a search returned in this request can be cited, and come back in the order
+# Claude listed them.
+def test_cites_retrieved_chunks(session, knowledge_base):
+    claude = FakeClaude(
+        tool_response(search()),
+        reply_response(citations=["failed-payments:0", "cancellation:5"]),
+    )
+
+    assert claude.reply(session).citations == ["failed-payments:0", "cancellation:5"]
+
+
+# A chunk cited more than once is kept once, at its first position.
+def test_drops_duplicate_citations_keeping_their_order(session, knowledge_base):
+    claude = FakeClaude(
+        tool_response(search()),
+        reply_response(
+            citations=["cancellation:5", "failed-payments:0", "cancellation:5"]
+        ),
+    )
+
+    assert claude.reply(session).citations == ["cancellation:5", "failed-payments:0"]
+
+
+# Chunks from every search in the request can be cited, whether the searches ran
+# together or in later rounds.
+def test_cites_chunks_from_several_searches(session, knowledge_base, monkeypatch):
+    def one_passage_per_query(client, query):
+        return [
+            SearchResult(
+                id=f"{query}:0",
+                document_id=query,
+                title=query.title(),
+                source=f"{query}.md",
+                section_heading=None,
+                text=query,
+                score=0.5,
+            )
+        ]
+
+    monkeypatch.setattr(retrieval, "search_knowledge_base", one_passage_per_query)
+    claude = FakeClaude(
+        tool_response(search("refunds", "toolu_1"), search("invoices", "toolu_2")),
+        tool_response(search("cancellation", "toolu_3")),
+        reply_response(citations=["cancellation:0", "refunds:0", "invoices:0"]),
+    )
+
+    citations = claude.reply(session).citations
+
+    assert citations == ["cancellation:0", "refunds:0", "invoices:0"]
+
+
+# A reply can cite nothing, whether it only used account data or no passage it found
+# supports a fact.
+@pytest.mark.parametrize(
+    "call", [tool_call("get_invoices"), search()], ids=["account_tool", "search"]
+)
+def test_allows_a_reply_without_citations(session, knowledge_base, call):
+    claude = FakeClaude(tool_response(call), reply_response())
+
+    assert claude.reply(session).citations == []
+
+
+# Citing anything searches didn't return in this request fails the reply like other
+# invalid output, so it's never shown as a source. That covers a made-up chunk ID
+# beside a real one, an account record, and a chunk when nothing was searched.
+@pytest.mark.parametrize(
+    ("calls", "citations", "unretrieved"),
+    [
+        ([search()], ["cancellation:5", "cancellation:99"], ["cancellation:99"]),
+        ([tool_call("get_invoices")], ["inv_1"], ["inv_1"]),
+        ([], ["cancellation:5"], ["cancellation:5"]),
+    ],
+    ids=["made_up_chunk", "account_record", "no_search"],
+)
+def test_rejects_citations_that_werent_retrieved(
+    session, knowledge_base, caplog, calls, citations, unretrieved
+):
+    claude = FakeClaude(
+        *[tool_response(call) for call in calls],
+        reply_response(citations=citations),
+    )
+
+    with pytest.raises(ReplyError, match="invalid reply"):
+        claude.reply(session)
+
+    assert f"Claude cited chunks that weren't retrieved: {unretrieved}" in caplog.text
+
+
+# Only this request's searches count, so a chunk found earlier in the conversation
+# has to be searched for again before it can be cited.
+def test_rejects_citing_a_chunk_from_an_earlier_turn(session, knowledge_base):
+    earlier = FakeClaude(
+        tool_response(search()), reply_response(citations=["cancellation:5"])
+    )
+    history = earlier.generate(session).llm_messages
+    claude = FakeClaude(reply_response(citations=["cancellation:5"]))
+
+    with pytest.raises(ReplyError, match="invalid reply"):
+        claude.generate(session, history=history)

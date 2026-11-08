@@ -73,6 +73,7 @@ def save_turn(
             conversation_id=conversation_id,
             question=question,
             reply=generated.reply.reply,
+            citations=generated.reply.citations,
             analysis=generated.reply.analysis.model_dump(mode="json"),
             llm_messages=generated.llm_messages,
         )

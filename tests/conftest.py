@@ -74,6 +74,7 @@ class FakeLLMService:
         )
         self.reply = SupportReply(
             reply="You were charged $49.00 on November 1.",
+            citations=["refunds-and-duplicate-charges:2"],
             analysis=self.analysis,
         )
 

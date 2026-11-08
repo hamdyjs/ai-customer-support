@@ -59,6 +59,7 @@ class ConversationTurnResponse(BaseModel):
 
     question: str
     reply: str
+    citations: list[str]
     analysis: QuestionAnalysis
     created_at: datetime
 
@@ -128,6 +129,7 @@ async def messages(
     return MessageResponse(
         conversation_id=saved_conversation_id,
         reply=generated.reply.reply,
+        citations=generated.reply.citations,
         analysis=generated.reply.analysis,
     )
 

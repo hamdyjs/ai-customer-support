@@ -108,9 +108,9 @@ def test_missing_api_key_returns_a_clear_error(client, monkeypatch, url):
     }
 
 
-# A valid message returns 200 with the conversation ID, the reply for the customer
-# and the analysis, using exactly these fields.
-def test_messages_returns_the_reply_and_analysis(client):
+# A valid message returns 200 with the conversation ID, the reply for the customer,
+# its citations and the analysis, using exactly these fields.
+def test_messages_returns_the_reply_citations_and_analysis(client):
     response = client.post(MESSAGES_URL, json={"question": "What did I pay?"})
 
     body = response.json()
@@ -118,6 +118,7 @@ def test_messages_returns_the_reply_and_analysis(client):
     assert body.pop("conversation_id").startswith("conv_")
     assert body == {
         "reply": "You were charged $49.00 on November 1.",
+        "citations": ["refunds-and-duplicate-charges:2"],
         "analysis": {
             "category": "billing",
             "priority": "high",

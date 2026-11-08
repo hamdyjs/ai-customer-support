@@ -150,6 +150,7 @@ class ConversationTurn(SQLModel, table=True):
     conversation_id: str = Field(foreign_key="conversation.id", index=True)
     question: str
     reply: str
+    citations: list[str] = Field(default_factory=list, sa_type=JSON)
     analysis: dict[str, Any] = Field(sa_type=JSON)
     llm_messages: list[dict[str, Any]] = Field(sa_type=JSON)
     created_at: datetime = Field(default_factory=utc_now)
