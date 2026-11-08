@@ -301,6 +301,17 @@ def test_run_tool_returns_json(session):
     assert customer["account_status"] == "active"
 
 
+# The subscription result Claude receives carries the plan's monthly and annual
+# prices, so a saving worked out from them is grounded in account data and doesn't
+# need a help-article search. The multi-upgrade-annual evaluation case relies on it.
+def test_run_tool_sends_plan_prices_to_claude(session):
+    subscription = json.loads(run_tool("get_subscription", {}, session, "cust_001"))[0]
+
+    assert subscription["plan_name"] == "Pro"
+    assert subscription["monthly_price_cents"] == 4900
+    assert subscription["annual_price_cents"] == 49000
+
+
 # run_tool passes the customer ID through to the tool it runs.
 def test_run_tool_uses_the_given_customer(session):
     invoices = json.loads(run_tool("get_invoices", {}, session, "cust_008"))

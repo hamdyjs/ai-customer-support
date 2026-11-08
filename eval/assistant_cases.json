@@ -1,0 +1,110 @@
+[
+  {
+    "id": "kb-invoice-pdf",
+    "category": "knowledge_base",
+    "customer_id": "cust_001",
+    "question": "How do I download my invoices as PDFs for my accountant?",
+    "expected_behavior": "Explains Settings > Billing > Invoices, selecting an invoice and Download PDF, and that ticking several and choosing Download selected gives one ZIP file. Cites the invoices article. Needs no account data.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": ["invoices"]
+  },
+  {
+    "id": "kb-payment-retries",
+    "category": "knowledge_base",
+    "customer_id": "cust_001",
+    "question": "If a card payment fails, when do you try again, and when would my account be suspended?",
+    "expected_behavior": "Says the first attempt is on the day the invoice is issued and there's one automatic retry on day 3, with no further automatic retries unless the card is updated. The invoice is due on day 7, overdue on day 8, and the account is suspended on day 37 if it's still unpaid. Cites the failed payments article. Doesn't describe this customer's account.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": ["failed-payments"]
+  },
+  {
+    "id": "kb-transfer-owner",
+    "category": "knowledge_base",
+    "customer_id": "cust_001",
+    "question": "Our office manager is leaving. How do I make a coworker the main person in charge of our Flowdesk account?",
+    "expected_behavior": "Recognizes this as transferring ownership: the current owner goes to Settings > Team, selects Transfer ownership and picks a team member, who accepts by email. If the owner has already left, the customer opens a support ticket. Cites the account settings article.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": ["account-settings"]
+  },
+  {
+    "id": "account-amount-owed",
+    "category": "account",
+    "customer_id": "cust_006",
+    "question": "Do I owe you anything right now?",
+    "expected_behavior": "Looks up invoices and reports two unpaid ones: inv_031 for $19.00 (October, overdue) and inv_032 for $19.00 (November, open), $38.00 in total. Any help-article facts it adds, such as how to pay, are cited.",
+    "expected_tools": ["get_invoices"],
+    "expected_articles": []
+  },
+  {
+    "id": "account-open-tickets",
+    "category": "account",
+    "customer_id": "cust_007",
+    "question": "What's happening with my open support tickets?",
+    "expected_behavior": "Lists the two unresolved tickets: Automation rules not running (open, high priority) and Help connecting an integration (in progress, medium priority). Leaves out the resolved ticket or clearly marks it as resolved. No citations unless it adds help-article facts.",
+    "expected_tools": ["get_support_tickets"],
+    "expected_articles": []
+  },
+  {
+    "id": "both-duplicate-refund",
+    "category": "knowledge_base_and_account",
+    "customer_id": "cust_002",
+    "question": "I think I was charged twice this month. Will I get the extra payment back?",
+    "expected_behavior": "Finds two successful $49.00 payments (pay_011 and pay_012) on invoice inv_011, two minutes apart on November 1, and calls it a possible duplicate. From the refunds article: support reviews it and refunds the extra payment in full if it's confirmed. Doesn't promise the refund. Recommends human review. Cites the refunds article.",
+    "expected_tools": ["get_payments", "search_knowledge_base"],
+    "expected_articles": ["refunds-and-duplicate-charges"]
+  },
+  {
+    "id": "both-cancel-refund",
+    "category": "knowledge_base_and_account",
+    "customer_id": "cust_005",
+    "question": "I cancelled recently. Do I get money back for the rest of the month, and until when can my team still use Flowdesk?",
+    "expected_behavior": "From the account: the monthly Pro subscription was cancelled on November 1 and access continues until December 1, 2026. From the articles: monthly plans aren't refunded for unused time. Doesn't promise a refund. Cites the cancellation or refunds article for the policy, not for the dates.",
+    "expected_tools": ["get_subscription", "search_knowledge_base"],
+    "expected_articles": ["cancellation", "refunds-and-duplicate-charges"]
+  },
+  {
+    "id": "gap-pause-subscription",
+    "category": "insufficient_or_ambiguous",
+    "customer_id": "cust_001",
+    "question": "Can I pause my subscription for two months while my team is away?",
+    "expected_behavior": "The articles don't cover pausing a subscription. Says briefly that it couldn't confirm this, without saying pausing isn't possible or isn't offered. Mentions a documented alternative, with a citation, only if it helps, such as cancelling and resubscribing within 90 days to keep the data. Short. Likely recommends human review.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": []
+  },
+  {
+    "id": "gap-card-details",
+    "category": "insufficient_or_ambiguous",
+    "customer_id": "cust_001",
+    "question": "Which card was charged for my November invoice, and when does that card expire?",
+    "expected_behavior": "Can confirm the $49.00 November payment succeeded, but says it can't see card details or expiry dates. Never invents a card brand, last four digits or date. May point to Settings > Billing > Payment method with a citation.",
+    "expected_tools": ["get_payments"],
+    "expected_articles": []
+  },
+  {
+    "id": "ambiguous-which-invoice",
+    "category": "insufficient_or_ambiguous",
+    "customer_id": "cust_006",
+    "question": "Is my invoice paid?",
+    "expected_behavior": "The customer has paid, overdue and open invoices, so the question is ambiguous. Either asks which invoice they mean, or briefly gives the status of each recent one (inv_031 overdue, inv_032 open, earlier ones paid) without guessing which one they meant.",
+    "expected_tools": ["get_invoices"],
+    "expected_articles": []
+  },
+  {
+    "id": "multi-upgrade-annual",
+    "category": "multi_part",
+    "customer_id": "cust_004",
+    "question": "Why did my charges go up in October, when is my next payment, and how much would I save a year by switching to annual billing?",
+    "expected_behavior": "Answers all three parts. The customer moved from Starter ($19.00) to Pro ($49.00) on October 1, their renewal date, so October's charge was $49.00 at full price. The next payment is $49.00 on December 1, 2026. get_subscription returns Pro's monthly and annual prices, so the saving ($588.00 a year monthly against $490.00 annual, $98.00) can come from account data without a search or citation. Any help-article facts it adds, such as how switching works, are cited.",
+    "expected_tools": ["get_subscription", "get_invoices"],
+    "expected_articles": []
+  },
+  {
+    "id": "multi-failed-then-card",
+    "category": "multi_part",
+    "customer_id": "cust_003",
+    "question": "Was I charged twice in October? And how do I update my card so a payment doesn't fail again?",
+    "expected_behavior": "Answers both parts. For October's $19.00 invoice inv_015, the October 1 attempt failed because the card had expired and didn't charge them, and the October 3 retry succeeded, so they were charged once. To update the card: Settings > Billing > Payment method, then Add card, which becomes the main card. Cites the article for the card steps.",
+    "expected_tools": ["get_payments", "search_knowledge_base"],
+    "expected_articles": ["account-settings"]
+  }
+]

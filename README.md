@@ -267,6 +267,18 @@ uv run python -m scripts.evaluate_retrieval | diff eval/baseline_report.txt -
 
 With 20 questions, one question moves Hit@1 by 0.05, so check which questions changed rather than relying only on the averages.
 
+To review the whole assistant end to end, run the following. It sends each of the 12 questions in `eval/assistant_cases.json` through the real `/v1/support/messages` route as a seeded customer, with real Claude calls, tools and help-article search. That covers 3 help-article questions, 2 account questions, 2 that need both, 3 where the evidence is missing or the question is ambiguous, and 2 multi-part questions. It uses your API key and costs a few cents, so it only runs when you start it. Like the real-API check, it uses a temporary seeded database and leaves `app.db` alone. Qdrant must be running with the articles stored:
+
+```bash
+uv run python -m scripts.evaluate_assistant > assistant_report.md
+```
+
+The Markdown report lists each case's question and expected behavior next to what happened: the tools used, compared with those expected; each search's query and returned chunks; the reply; the text of each cited chunk; the analysis; and the time taken. Nothing is scored, because whether an answer is right, grounded and well cited needs a person to judge, so each case ends with a checklist to fill in. Progress goes to the terminal. To rerun only some cases, add `--case` with a case ID, once per case:
+
+```bash
+uv run python -m scripts.evaluate_assistant --case kb-invoice-pdf --case multi-upgrade-annual > assistant_report.md
+```
+
 ## Configuration
 
 | Setting             | Required             | Purpose                                                                                                                    |
@@ -292,12 +304,14 @@ app/
     ├── models.py      # Tables
     └── seed.py        # Fake data
 eval/
+├── assistant_cases.json  # Questions for the end-to-end assistant evaluation, with expected behavior
 ├── baseline_report.txt   # Evaluation report from before any retrieval improvements
 └── retrieval_cases.json  # Customer questions labeled with the articles and chunks that answer them
 knowledge_base/        # Markdown help articles
 qdrant_storage/        # Qdrant's data from Docker, not committed
 scripts/
 ├── check_real_api.py  # Opt-in check against real Claude
+├── evaluate_assistant.py  # Runs the assistant end to end on the cases in eval/ for review
 ├── evaluate_retrieval.py  # Scores search against the labeled questions in eval/
 ├── ingest.py          # Chunks, embeds and stores the help articles in Qdrant
 └── search.py          # Searches the help articles from the command line
