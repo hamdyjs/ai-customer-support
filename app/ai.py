@@ -30,6 +30,7 @@ from sqlmodel import Session
 
 from app.db.database import SessionFactory
 from app.db.models import TicketPriority
+from app.retrieval import RetrievalError
 from app.tools import TOOL_DEFINITIONS, run_tool
 
 load_dotenv()
@@ -52,6 +53,7 @@ OUTPUT_COST_PER_MTOK = 0.50
 CACHE_READ_COST_PER_MTOK = 0.01
 CACHE_WRITE_COST_PER_MTOK = 0.125
 UNAVAILABLE_MESSAGE = "The Claude API is temporarily unavailable"
+SEARCH_UNAVAILABLE_MESSAGE = "The help articles can't be searched right now"
 CLASSIFICATION_RULES = """\
 Categorize the question:
 - billing: charges, invoices, payments, refunds, or plan pricing
@@ -69,8 +71,14 @@ speaking directly with a signed-in customer.
 
 Use your tools to look up this customer's data before answering questions about
 their account, subscription, billing, payments, or support tickets. Never guess
-at those details, and only state what the tools return. The tools only ever return
-this customer's own data, so you can't help with anyone else's account.
+at those details, and only state what the tools return. The account tools only ever
+return this customer's own data, so you can't help with anyone else's account.
+
+For questions about how Flowdesk works or its policies, such as cancellation, refunds
+or failed payments, search the help articles with search_knowledge_base and answer
+from the passages it returns. Don't state a policy the passages don't support. Some
+questions need both, such as whether this customer's charge can be refunded: look up
+their data and search the help articles.
 
 When reading the data:
 - Amounts are in cents, so show them in dollars: 4900 is $49.00.
@@ -103,7 +111,7 @@ as reply.
 
 Recommend human review if the customer disputes a charge or asks for a refund or an
 account change, if the data shows a possible duplicate charge, or if you couldn't
-answer from the data."""
+answer from the data or the help articles."""
 SYSTEM_PROMPT = f"""\
 You analyze customer support questions for Flowdesk, a project management product.
 
@@ -214,13 +222,19 @@ def run_tool_call(
     tool_call: ToolUseBlock, session: Session, customer_id: str
 ) -> ToolResultBlockParam:
     try:
-        content = run_tool(tool_call.name, session, customer_id)
-    except ValueError as error:
+        content = run_tool(tool_call.name, tool_call.input, session, customer_id)
+    except (ValueError, RetrievalError) as error:
         print(f"  Tool error: {tool_call.name} -> {error}")
+        message = str(error)
+        # Retrieval errors name our servers and setup commands, which are for us, not
+        # for Claude to repeat to the customer.
+        if isinstance(error, RetrievalError):
+            logger.error("Knowledge base search failed: %s", error)
+            message = SEARCH_UNAVAILABLE_MESSAGE
         return {
             "type": "tool_result",
             "tool_use_id": tool_call.id,
-            "content": f"Error: {error}",
+            "content": f"Error: {message}",
             "is_error": True,
         }
     return {"type": "tool_result", "tool_use_id": tool_call.id, "content": content}

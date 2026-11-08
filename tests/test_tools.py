@@ -20,8 +20,8 @@ from app.db.models import (
     TicketStatus,
 )
 from app.tools import (
+    CUSTOMER_TOOLS,
     TOOL_DEFINITIONS,
-    TOOLS,
     get_customer,
     get_invoices,
     get_payments,
@@ -260,28 +260,40 @@ def test_tools_return_empty_lists_without_records(session, tool):
     assert tool(session, "cust_999") == []
 
 
-# Claude can't choose a customer, because no tool accepts any input. The customer
-# ID always comes from our code.
-def test_tool_definitions_take_no_input():
-    for definition in TOOL_DEFINITIONS:
-        assert definition["input_schema"] == {
+# Claude can't choose a customer: the customer tools accept no input, and the search
+# tool accepts only a query. The customer ID always comes from our code.
+def test_tool_definitions_take_no_customer_input():
+    schemas = {
+        definition["name"]: definition["input_schema"]
+        for definition in TOOL_DEFINITIONS
+    }
+
+    for name in CUSTOMER_TOOLS:
+        assert schemas[name] == {
             "type": "object",
             "properties": {},
             "additionalProperties": False,
         }
+    search = schemas["search_knowledge_base"]
+    assert set(search["properties"]) == {"query"}
+    assert search["required"] == ["query"]
+    assert search["additionalProperties"] is False
 
 
 # Every tool Claude is told about has a function behind it, and vice versa.
 def test_tool_definitions_match_the_tool_functions():
-    assert {definition["name"] for definition in TOOL_DEFINITIONS} == set(TOOLS)
+    assert {definition["name"] for definition in TOOL_DEFINITIONS} == {
+        *CUSTOMER_TOOLS,
+        "search_knowledge_base",
+    }
 
 
 # run_tool returns JSON text, which is what's sent back to Claude. Dates and
 # statuses become plain strings.
 def test_run_tool_returns_json(session):
-    invoices = json.loads(run_tool("get_invoices", session, "cust_001"))
-    payments = json.loads(run_tool("get_payments", session, "cust_001"))
-    customer = json.loads(run_tool("get_customer", session, "cust_001"))
+    invoices = json.loads(run_tool("get_invoices", {}, session, "cust_001"))
+    payments = json.loads(run_tool("get_payments", {}, session, "cust_001"))
+    customer = json.loads(run_tool("get_customer", {}, session, "cust_001"))
 
     assert invoices[0]["status"] == "paid"
     assert invoices[0]["issued_at"] == "2026-11-01"
@@ -291,7 +303,7 @@ def test_run_tool_returns_json(session):
 
 # run_tool passes the customer ID through to the tool it runs.
 def test_run_tool_uses_the_given_customer(session):
-    invoices = json.loads(run_tool("get_invoices", session, "cust_008"))
+    invoices = json.loads(run_tool("get_invoices", {}, session, "cust_008"))
 
     assert [invoice["id"] for invoice in invoices] == ["inv_8"]
 
@@ -299,4 +311,49 @@ def test_run_tool_uses_the_given_customer(session):
 # A tool name we don't recognize raises an error instead of running anything.
 def test_run_tool_rejects_unknown_tools(session):
     with pytest.raises(ValueError, match="Unknown tool: get_everything"):
-        run_tool("get_everything", session, "cust_001")
+        run_tool("get_everything", {}, session, "cust_001")
+
+
+# The search tool sends Claude's query to retrieval and returns each passage's ID,
+# article, title, heading, source and text, best match first. The score stays out.
+def test_search_knowledge_base_returns_passages(session, knowledge_base):
+    passages = json.loads(
+        run_tool("search_knowledge_base", {"query": "refunds"}, session, "cust_001")
+    )
+
+    assert knowledge_base.queries == ["refunds"]
+    assert passages == [
+        {
+            "id": "cancellation:5",
+            "document_id": "cancellation",
+            "title": "Canceling Your Subscription",
+            "section_heading": "Refunds after canceling",
+            "source": "cancellation.md",
+            "text": (
+                "Canceling Your Subscription\nRefunds after canceling\n\n"
+                "Canceling doesn't refund the current period."
+            ),
+        },
+        {
+            "id": "failed-payments:0",
+            "document_id": "failed-payments",
+            "title": "Failed Payments",
+            "section_heading": None,
+            "source": "failed-payments.md",
+            "text": "Failed Payments\n\nWe retry a failed payment three times.",
+        },
+    ]
+
+
+# A missing, blank or non-text query raises an error before anything is searched, so
+# Claude is told to correct its call.
+@pytest.mark.parametrize(
+    "tool_input",
+    [{}, {"query": "  "}, {"query": 5}],
+    ids=["missing", "blank", "not_text"],
+)
+def test_search_knowledge_base_needs_a_query(session, knowledge_base, tool_input):
+    with pytest.raises(ValueError, match="search_knowledge_base needs a query"):
+        run_tool("search_knowledge_base", tool_input, session, "cust_001")
+
+    assert knowledge_base.queries == []

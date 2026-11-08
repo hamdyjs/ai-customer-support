@@ -4,11 +4,14 @@ from datetime import date
 
 import httpx2
 import pytest
+from qdrant_client import QdrantClient
 from sqlmodel import Session, SQLModel, create_engine
 
+from app import retrieval
 from app.ai import (
     DEFAULT_RETRY_AFTER_SECONDS,
     MAX_LLM_CALLS,
+    SEARCH_UNAVAILABLE_MESSAGE,
     ReplyError,
     SupportReply,
 )
@@ -318,10 +321,127 @@ def test_unknown_tool_is_reported_back_to_claude(session):
     assert "Unknown tool: get_everything" in result["content"]
 
 
-# If Claude keeps asking for tools, the loop stops at the limit, which caps the
-# cost of a single request.
-def test_stops_after_too_many_calls(session):
-    responses = [tool_response(tool_call("get_customer")) for _ in range(20)]
+# A help-article question: Claude's own query is searched, and the passages go back
+# linked to the call, with their IDs, titles, headings, sources and text.
+def test_searches_the_knowledge_base(session, knowledge_base):
+    claude = FakeClaude(
+        tool_response(
+            tool_call("search_knowledge_base", tool_input={"query": "refund on cancel"})
+        ),
+        reply_response("Canceling doesn't refund the current period."),
+    )
+
+    result = claude.generate(session, message="Do I get money back if I cancel?")
+
+    assert result.reply.reply == "Canceling doesn't refund the current period."
+    assert knowledge_base.queries == ["refund on cancel"]
+    tool_result = claude.requests[1]["messages"][-1]["content"][0]
+    assert tool_result["tool_use_id"] == "toolu_1"
+    passage = json.loads(tool_result["content"])[0]
+    assert passage["id"] == "cancellation:5"
+    assert set(passage) == {
+        "id",
+        "document_id",
+        "title",
+        "section_heading",
+        "source",
+        "text",
+    }
+
+
+# An account question still runs the database tool for the signed-in customer, with
+# the search tool offered alongside, and the help articles aren't searched.
+def test_account_question_uses_the_customers_data(session, knowledge_base):
+    claude = FakeClaude(tool_response(tool_call("get_invoices")), reply_response())
+
+    claude.reply(session, customer_id="cust_008")
+
+    offered = {tool["name"] for tool in claude.requests[0]["tools"]}
+    assert {"get_invoices", "search_knowledge_base"} <= offered
+    result = claude.requests[1]["messages"][-1]["content"][0]
+    assert [invoice["id"] for invoice in json.loads(result["content"])] == ["inv_8"]
+    assert knowledge_base.queries == []
+
+
+# A question needing both sources: the account lookup and the search run in the same
+# turn, and both results go back together, each linked to its call.
+def test_uses_account_data_and_help_articles_in_one_turn(session, knowledge_base):
+    claude = FakeClaude(
+        tool_response(
+            tool_call("get_invoices", "toolu_1"),
+            tool_call("search_knowledge_base", "toolu_2", {"query": "refunds"}),
+        ),
+        reply_response(),
+    )
+
+    claude.generate(session, "cust_008", message="Can I get a refund for my invoice?")
+
+    results = claude.requests[1]["messages"][-1]["content"]
+    invoices = json.loads(results[0]["content"])
+    passages = json.loads(results[1]["content"])
+    assert [result["tool_use_id"] for result in results] == ["toolu_1", "toolu_2"]
+    assert [invoice["id"] for invoice in invoices] == ["inv_8"]
+    assert passages[0]["id"] == "cancellation:5"
+
+
+# Claude can also look up the account first and search in a later round, and each
+# request includes everything found so far.
+def test_uses_account_data_and_help_articles_in_separate_rounds(
+    session, knowledge_base
+):
+    claude = FakeClaude(
+        tool_response(tool_call("get_invoices", "toolu_1")),
+        tool_response(
+            tool_call("search_knowledge_base", "toolu_2", {"query": "refunds"})
+        ),
+        reply_response("Done."),
+    )
+
+    reply = claude.generate(session, message="Can I get a refund for my invoice?")
+
+    assert reply.reply.reply == "Done."
+    assert [len(request["messages"]) for request in claude.requests] == [1, 3, 5]
+    final_messages = claude.requests[2]["messages"]
+    invoices = json.loads(final_messages[2]["content"][0]["content"])
+    passages = json.loads(final_messages[4]["content"][0]["content"])
+    assert [invoice["id"] for invoice in invoices] == ["inv_1"]
+    assert passages[0]["id"] == "cancellation:5"
+
+
+# If the search fails, Claude gets a general error it can answer around, the details
+# are logged for us, and the request still returns a reply.
+def test_search_failure_is_reported_back_to_claude(
+    session, knowledge_base, monkeypatch, caplog
+):
+    # A Qdrant without the knowledge_base collection, as before the first ingest.
+    monkeypatch.setattr(
+        retrieval, "get_qdrant_client", lambda: QdrantClient(":memory:")
+    )
+    claude = FakeClaude(
+        tool_response(tool_call("search_knowledge_base", tool_input={"query": "x"})),
+        reply_response("Sorry, I can't check that right now."),
+    )
+
+    assert claude.reply(session).reply == "Sorry, I can't check that right now."
+
+    result = claude.requests[1]["messages"][-1]["content"][0]
+    assert result["is_error"] is True
+    assert result["content"] == f"Error: {SEARCH_UNAVAILABLE_MESSAGE}"
+    assert "Knowledge base search failed" in caplog.text
+
+
+# If Claude keeps asking for tools, including searches, the loop stops at the limit,
+# which caps the cost of a single request.
+@pytest.mark.parametrize(
+    "call",
+    [
+        tool_call("get_customer"),
+        tool_call("search_knowledge_base", tool_input={"query": "refunds"}),
+    ],
+    ids=["account_tool", "search"],
+)
+def test_stops_after_too_many_calls(session, knowledge_base, call):
+    responses = [tool_response(call) for _ in range(20)]
     claude = FakeClaude(*responses)
 
     with pytest.raises(ReplyError, match="too many tool calls"):

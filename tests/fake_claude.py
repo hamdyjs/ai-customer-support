@@ -69,10 +69,12 @@ class FakeClaude:
         )
         return LLMService(client)
 
-    def generate(self, session, customer_id="cust_001", history=None):
+    def generate(
+        self, session, customer_id="cust_001", history=None, message="What did I pay?"
+    ):
         return asyncio.run(
             self.service().generate_reply(
-                "What did I pay?",
+                message,
                 history or [],
                 lambda: Session(session.get_bind()),
                 customer_id,

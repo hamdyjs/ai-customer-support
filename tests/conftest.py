@@ -1,8 +1,11 @@
+import numpy as np
 import pytest
+from qdrant_client import QdrantClient
 from sqlalchemy import event
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
+from app import retrieval
 from app.ai import (
     GeneratedReply,
     QuestionAnalysis,
@@ -12,6 +15,48 @@ from app.ai import (
 )
 from app.db.models import TicketPriority
 from app.main import app
+from scripts.ingest import (
+    EMBEDDING_DIMENSIONS,
+    Chunk,
+    EmbeddedChunk,
+    store_knowledge_base,
+)
+
+PASSAGES = [
+    Chunk(
+        id="cancellation:5",
+        document_id="cancellation",
+        title="Canceling Your Subscription",
+        source="cancellation.md",
+        section_heading="Refunds after canceling",
+        chunk_index=5,
+        text=(
+            "Canceling Your Subscription\nRefunds after canceling\n\n"
+            "Canceling doesn't refund the current period."
+        ),
+    ),
+    Chunk(
+        id="failed-payments:0",
+        document_id="failed-payments",
+        title="Failed Payments",
+        source="failed-payments.md",
+        section_heading=None,
+        chunk_index=0,
+        text="Failed Payments\n\nWe retry a failed payment three times.",
+    ),
+]
+# Every query embeds to this vector, which scores 0.8 against the first passage and
+# 0.6 against the second, so the first always ranks higher.
+QUERY_VECTOR = [0.8, 0.6] + [0.0] * (EMBEDDING_DIMENSIONS - 2)
+
+
+class FakeEmbeddingModel:
+    def __init__(self):
+        self.queries = []
+
+    def encode(self, query):
+        self.queries.append(query)
+        return np.array(QUERY_VECTOR)
 
 
 class FakeLLMService:
@@ -79,3 +124,24 @@ def engine():
 
     SQLModel.metadata.create_all(engine)
     return engine
+
+
+# Searches use an in-memory Qdrant collection holding PASSAGES and a fake embedding
+# model, so they need neither Docker nor PyTorch. The model records each query.
+@pytest.fixture
+def knowledge_base(monkeypatch):
+    client = QdrantClient(":memory:")
+    store_knowledge_base(
+        [
+            EmbeddedChunk(
+                chunk=chunk,
+                embedding=[float(i == position) for i in range(EMBEDDING_DIMENSIONS)],
+            )
+            for position, chunk in enumerate(PASSAGES)
+        ],
+        client,
+    )
+    model = FakeEmbeddingModel()
+    monkeypatch.setattr(retrieval, "get_qdrant_client", lambda: client)
+    monkeypatch.setattr(retrieval, "get_embedding_model", lambda: model)
+    return model

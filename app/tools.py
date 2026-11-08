@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic_core import to_json
 from sqlmodel import Session, col, select
 
+from app import retrieval
 from app.db.models import (
     AccountStatus,
     BillingCycle,
@@ -78,6 +79,15 @@ class SupportTicketResult(ToolResult):
     resolved_at: date | None
 
 
+class PassageResult(ToolResult):
+    id: str  # the chunk's ID: document_id:chunk_index
+    document_id: str
+    title: str
+    section_heading: str | None
+    source: str
+    text: str
+
+
 def get_customer(session: Session, customer_id: str) -> CustomerResult:
     customer = session.exec(select(Customer).where(Customer.id == customer_id)).one()
     return CustomerResult.model_validate(customer)
@@ -136,7 +146,14 @@ def get_support_tickets(
     return [SupportTicketResult.model_validate(ticket) for ticket in tickets]
 
 
-TOOLS = {
+def search_knowledge_base(query: str) -> list[PassageResult]:
+    results = retrieval.search_knowledge_base(retrieval.get_qdrant_client(), query)
+    return [PassageResult.model_validate(result) for result in results]
+
+
+# Tools for the signed-in customer's own data. They take no input, so Claude can't
+# choose whose data they return.
+CUSTOMER_TOOLS = {
     "get_customer": get_customer,
     "get_subscription": get_subscription,
     "get_invoices": get_invoices,
@@ -199,10 +216,42 @@ TOOL_DEFINITIONS: list[ToolParam] = [
         ),
         "input_schema": NO_INPUT_SCHEMA,
     },
+    {
+        "name": "search_knowledge_base",
+        "description": (
+            "Search Flowdesk's help articles, which cover account settings, "
+            "cancellation, failed payments, invoices, refunds and duplicate charges, "
+            "subscription changes, support tickets, and troubleshooting. Returns the "
+            "closest passages, best first, each with its chunk ID, article ID, title, "
+            "section heading, source file, and text. Use this for how Flowdesk works "
+            "and its policies. It has no customer data. Describe the topic in the "
+            "product's own terms rather than repeating the customer's message, and "
+            "search again with different words if the passages don't answer it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to look for, such as 'refund after canceling'",
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
-def run_tool(name: str, session: Session, customer_id: str) -> str:
-    if name not in TOOLS:
+def run_tool(
+    name: str, tool_input: dict[str, object], session: Session, customer_id: str
+) -> str:
+    if name == "search_knowledge_base":
+        query = tool_input.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("search_knowledge_base needs a query")
+        return to_json(search_knowledge_base(query)).decode()
+    if name not in CUSTOMER_TOOLS:
         raise ValueError(f"Unknown tool: {name}")
-    return to_json(TOOLS[name](session, customer_id)).decode()
+    # Claude's input is ignored, so the customer always comes from our code.
+    return to_json(CUSTOMER_TOOLS[name](session, customer_id)).decode()
