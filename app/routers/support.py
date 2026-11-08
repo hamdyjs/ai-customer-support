@@ -24,6 +24,7 @@ from app.conversations import (
 )
 from app.db.database import SessionDep, SessionFactoryDep
 from app.db.models import Conversation
+from app.tracing import trace_request
 
 MAX_QUESTION_LENGTH = 4000
 
@@ -107,31 +108,32 @@ async def messages(
     Claude sees only the conversation's most recent turns, and a failed turn isn't
     saved. The full history stays available from the conversation endpoints.
     """
-    customer_id = customer.id
-    conversation_id = request.conversation_id
-    history: list[MessageParam] = []
-    if conversation_id is not None:
+    with trace_request("support-message"):
+        customer_id = customer.id
+        conversation_id = request.conversation_id
+        history: list[MessageParam] = []
+        if conversation_id is not None:
+            with new_session() as session:
+                get_conversation_or_404(session, conversation_id, customer_id)
+                history = load_llm_history(session, conversation_id)
+
+        try:
+            generated = await llm.generate_reply(
+                request.question, history, new_session, customer_id
+            )
+        except ReplyError as error:
+            raise to_http_exception(error) from error
+
         with new_session() as session:
-            get_conversation_or_404(session, conversation_id, customer_id)
-            history = load_llm_history(session, conversation_id)
-
-    try:
-        generated = await llm.generate_reply(
-            request.question, history, new_session, customer_id
+            saved_conversation_id = save_turn(
+                session, conversation_id, customer_id, request.question, generated
+            )
+        return MessageResponse(
+            conversation_id=saved_conversation_id,
+            reply=generated.reply.reply,
+            citations=generated.reply.citations,
+            analysis=generated.reply.analysis,
         )
-    except ReplyError as error:
-        raise to_http_exception(error) from error
-
-    with new_session() as session:
-        saved_conversation_id = save_turn(
-            session, conversation_id, customer_id, request.question, generated
-        )
-    return MessageResponse(
-        conversation_id=saved_conversation_id,
-        reply=generated.reply.reply,
-        citations=generated.reply.citations,
-        analysis=generated.reply.analysis,
-    )
 
 
 @router.get("/conversations")

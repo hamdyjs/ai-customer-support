@@ -14,7 +14,7 @@ The data belongs to **Flowdesk**, a fictional project management product. All cu
 
 ## Tech stack
 
-Python 3.13, FastAPI, Pydantic, SQLModel, SQLite, the Anthropic Python SDK with Claude Haiku 5.5, sentence-transformers, Qdrant, pytest, and uv.
+Python 3.13, FastAPI, Pydantic, SQLModel, SQLite, the Anthropic Python SDK with Claude Haiku 5.5, sentence-transformers, Qdrant, Langfuse, pytest, and uv.
 
 ## Setup
 
@@ -189,6 +189,12 @@ The server console prints each step of a request, with token usage and an estima
 
 Failures are logged with their status code or stop reason, and the API request ID where there is one. The cost uses the Haiku 5.5 prices in `app/ai.py`, for prompts up to 100K tokens, so check them against [current pricing](https://www.anthropic.com/pricing) if you rely on the figure.
 
+### Tracing
+
+With Langfuse keys in `.env`, each `POST /v1/support/messages` request is sent to [Langfuse Cloud](https://cloud.langfuse.com) as one trace, `support-message`. A trace holds only the request's duration, whether it failed, and a random request ID such as `req_3f9c...`. It never holds the question, prompts, replies, tool results, errors or any customer details, and the spans the Anthropic SDK makes for each Claude call aren't sent. A failed request, such as a `404` or `502`, is marked with the `ERROR` level, without its error message. Requests rejected before the route runs, such as a `401` or `422`, aren't traced.
+
+Without the keys nothing is traced. Tracing runs alongside the request and never changes its response: if Langfuse is unreachable or fails, the error is logged and the request carries on.
+
 ## Testing
 
 Run the test suite with:
@@ -281,11 +287,15 @@ uv run python -m scripts.evaluate_assistant --case kb-invoice-pdf --case multi-u
 
 ## Configuration
 
-| Setting             | Required             | Purpose                                                                                                                    |
-| ------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | For the AI endpoints | Your Claude API key, set in `.env`                                                                                         |
-| `DATABASE_URL`      | No                   | Uses a different database, set in your shell rather than `.env`. Defaults to `app.db` in the project folder                |
-| `QDRANT_URL`        | No                   | Where the help articles are stored and searched, set in your shell rather than `.env`. Defaults to `http://localhost:6333` |
+| Setting                    | Required             | Purpose                                                                                                                    |
+| -------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`        | For the AI endpoints | Your Claude API key, set in `.env`                                                                                         |
+| `DATABASE_URL`             | No                   | Uses a different database, set in your shell rather than `.env`. Defaults to `app.db` in the project folder                |
+| `QDRANT_URL`               | No                   | Where the help articles are stored and searched, set in your shell rather than `.env`. Defaults to `http://localhost:6333` |
+| `LANGFUSE_PUBLIC_KEY`      | For tracing          | Your Langfuse project's public key, set in `.env`. Tracing is off unless both keys are set                                 |
+| `LANGFUSE_SECRET_KEY`      | For tracing          | Your Langfuse project's secret key, set in `.env`                                                                          |
+| `LANGFUSE_BASE_URL`        | No                   | Your Langfuse Cloud region. Defaults to the EU region, `https://cloud.langfuse.com`                                        |
+| `LANGFUSE_TRACING_ENABLED` | No                   | Set to `false` to turn tracing off while keeping the keys                                                                  |
 
 ## Project layout
 
@@ -297,6 +307,7 @@ app/
 ├── tools.py           # Read-only tools for Claude
 ├── conversations.py   # Loads and saves conversation turns
 ├── retrieval.py       # Searches the help articles in Qdrant
+├── tracing.py         # Optional request tracing with Langfuse
 ├── routers/
 │   └── support.py     # API endpoints and request/response models
 └── db/

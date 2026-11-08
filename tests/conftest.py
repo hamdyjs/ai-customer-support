@@ -5,7 +5,7 @@ from sqlalchemy import event
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
-from app import retrieval
+from app import retrieval, tracing
 from app.ai import (
     GeneratedReply,
     QuestionAnalysis,
@@ -101,6 +101,17 @@ class FakeLLMService:
                 },
             ],
         )
+
+
+# Tracing is off in every test, even when .env has Langfuse keys, so no test sends
+# data to Langfuse. The tracing tests turn it on with an in-memory exporter.
+@pytest.fixture(autouse=True)
+def no_tracing(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    tracing.get_langfuse.cache_clear()
+    yield
+    tracing.get_langfuse.cache_clear()
 
 
 @pytest.fixture
