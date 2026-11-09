@@ -2,7 +2,12 @@ import asyncio
 import json
 
 import httpx2
-from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
+from anthropic import (
+    Anthropic,
+    AsyncAnthropic,
+    DefaultAsyncHttpxClient,
+    DefaultHttpxClient,
+)
 from sqlmodel import Session
 
 from app.ai import MODEL, LLMService
@@ -60,6 +65,14 @@ class FakeClaude:
         if isinstance(response, Exception):
             raise response
         return response
+
+    # A synchronous client, as the evaluation scripts use.
+    def client(self):
+        return Anthropic(
+            api_key="test-key",
+            max_retries=0,
+            http_client=DefaultHttpxClient(transport=httpx2.MockTransport(self)),
+        )
 
     def service(self):
         client = AsyncAnthropic(

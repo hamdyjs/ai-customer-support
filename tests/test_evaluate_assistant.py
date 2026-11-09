@@ -1,14 +1,18 @@
 import json
+import subprocess
 from collections import Counter
 from datetime import UTC, date, datetime
+from unittest.mock import Mock
 
 import pytest
 from sqlmodel import Session
 
+from app import tracing
 from app.ai import get_llm_service
 from app.db.database import get_session_factory
 from app.db.models import AccountStatus, Customer
 from app.main import app
+from scripts import evaluate_assistant
 from scripts.evaluate_assistant import (
     AssistantCase,
     CaseResult,
@@ -16,15 +20,26 @@ from scripts.evaluate_assistant import (
     ToolCall,
     ToolRecorder,
     format_report,
+    judge_results,
     load_cases,
+    main,
     run_cases,
     select_cases,
 )
 from scripts.ingest import KNOWLEDGE_BASE_DIR
+from scripts.judge_faithfulness import (
+    JUDGE_MODEL,
+    FaithfulnessResult,
+    JudgedClaim,
+    Verdict,
+)
+from scripts.validate_golden_dataset import load_golden_cases
 from tests.fake_claude import (
     ANALYSIS,
     FakeClaude,
+    message_response,
     reply_response,
+    text_block,
     tool_call,
     tool_response,
 )
@@ -68,6 +83,34 @@ def write_cases(tmp_path, cases):
     path = tmp_path / "cases.json"
     path.write_text(json.dumps(cases))
     return path
+
+
+def add_customer(engine):
+    with Session(engine) as session:
+        session.add(
+            Customer(
+                id="cust_001",
+                name="Alex Morgan",
+                email="alex@example.com",
+                company_name="Acme Studio",
+                account_status=AccountStatus.active,
+                created_at=date(2026, 1, 15),
+            )
+        )
+        session.commit()
+
+
+def answered(case=CASE, reply="Canceling doesn't refund the current period."):
+    body = {"reply": reply, "citations": [], "analysis": ANALYSIS}
+    return CaseResult(case, 200, body, [search_call([PASSAGE])], 1.0)
+
+
+def judged(verdict, summary, *claims):
+    return FaithfulnessResult(
+        verdict,
+        summary,
+        [JudgedClaim(claim=c, verdict=v, explanation=e) for c, v, e in claims],
+    )
 
 
 # The dataset has the 12 planned cases, in the agreed mix of question types.
@@ -139,18 +182,7 @@ def test_tool_recorder_returns_the_real_result():
 # calls with what the search returned, and the time are all captured. The app's
 # console output goes to stderr, so stdout holds only the report.
 def test_run_cases_uses_the_real_api_route(engine, knowledge_base, capsys):
-    with Session(engine) as session:
-        session.add(
-            Customer(
-                id="cust_001",
-                name="Alex Morgan",
-                email="alex@example.com",
-                company_name="Acme Studio",
-                account_status=AccountStatus.active,
-                created_at=date(2026, 1, 15),
-            )
-        )
-        session.commit()
+    add_customer(engine)
     claude = FakeClaude(
         tool_response(
             tool_call("search_knowledge_base", tool_input={"query": "refunds"})
@@ -225,3 +257,121 @@ def test_report_shows_failures():
     assert "   - Failed: Error: down" in report
     assert "**Request failed:** HTTP 502: The model returned an invalid reply" in report
     assert "**Reply:**" not in report
+
+
+# Evaluation requests never reach Langfuse, even when its keys are set, so they don't
+# mix with real customers' traces.
+def test_run_cases_is_not_traced(engine, knowledge_base, monkeypatch):
+    add_customer(engine)
+    langfuse = Mock()
+    monkeypatch.setattr(tracing, "get_langfuse", Mock(return_value=langfuse))
+    claude = FakeClaude(reply_response("You paid $49.00."))
+    app.dependency_overrides[get_session_factory] = lambda: lambda: Session(engine)
+    app.dependency_overrides[get_llm_service] = claude.service
+    try:
+        [result] = run_cases([CASE])
+    finally:
+        app.dependency_overrides.clear()
+
+    assert result.status_code == 200
+    langfuse.start_observation.assert_not_called()
+
+
+# The judge gets the question, the reply and the tool results, never the expected
+# behavior or golden facts and claims, even for a golden case. Failed requests have
+# no reply to judge, so they're skipped.
+def test_judge_results_judges_replies_only_from_tool_results():
+    golden = load_golden_cases()[0]
+    reply = "Open Settings and look under Billing."
+    failed = CaseResult(CASE, 502, {"detail": "Down"}, [], 1.0)
+    claude = FakeClaude(
+        message_response(
+            [text_block(json.dumps({"claims": [], "summary": "No claims."}))]
+        )
+    )
+
+    judge_results([answered(golden, reply), failed], claude.client())
+
+    [request] = claude.requests
+    prompt = request["messages"][0]["content"]
+    assert reply in prompt and json.dumps([PASSAGE]) in prompt
+    golden_text = [golden.expected_behavior, *golden.prohibited_claims]
+    golden_text += [fact.text for fact in golden.expected_facts + golden.optional_facts]
+    assert not [text for text in golden_text if text in prompt]
+    assert failed.faithfulness is None
+
+
+# The judge only runs, and only costs money, when --judge is passed. Without it,
+# nothing is judged and the report has no faithfulness section.
+@pytest.mark.parametrize(("argv", "judge"), [([], False), (["--judge"], True)])
+def test_the_judge_runs_only_when_asked(monkeypatch, capsys, argv, judge):
+    calls = []
+
+    def fake_judge(client, question, reply, tool_calls):
+        calls.append(question)
+        return judged(Verdict.passed, "Every claim is backed.")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "sqlite://")
+    monkeypatch.setattr(evaluate_assistant, "load_dotenv", lambda: None)
+    monkeypatch.setattr(evaluate_assistant, "knowledge_base_problem", lambda: None)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        evaluate_assistant, "run_cases", lambda cases: [answered(c) for c in cases]
+    )
+    monkeypatch.setattr(evaluate_assistant, "judge_faithfulness", fake_judge)
+
+    assert main([*argv, "--case", "kb-invoice-pdf"]) == 0
+
+    assert len(calls) == (1 if judge else 0)
+    assert ("**Faithfulness:**" in capsys.readouterr().out) is judge
+
+
+# A judged report counts the verdicts, adds a column for them, and lists the claims
+# that failed or that the reply couldn't confirm, with the judge's reasons. Judge
+# errors and cases that weren't judged are shown as such.
+def test_report_shows_faithfulness():
+    passing = answered()
+    passing.faithfulness = judged(
+        Verdict.passed,
+        "Every claim is backed.",
+        ("No refund for the current period.", "supported", "cancellation:5 says so."),
+        ("It couldn't confirm the card.", "uncertain", "No card details."),
+    )
+    failing = answered()
+    failing.faithfulness = judged(
+        Verdict.failed,
+        "One claim isn't backed.",
+        ("You'll get $10 back.", "contradicted", "cancellation:5 says no refund."),
+    )
+    errored = answered()
+    errored.faithfulness = judged(Verdict.error, "The judge request failed: down")
+    unjudged = CaseResult(CASE, 502, {"detail": "Down"}, [], 1.0)
+
+    report = format_report(
+        [passing, failing, errored, unjudged], datetime(2026, 11, 9, tzinfo=UTC), "m"
+    )
+
+    assert (
+        f"Faithfulness judged by {JUDGE_MODEL}: 1 passed, 1 failed, 1 judge errors, "
+        "1 not judged."
+    ) in report
+    assert "| Time | Faithfulness |" in report
+    assert "| 1.0 s | fail |" in report and "| 1.0 s | not judged |" in report
+    assert (
+        "**Faithfulness:** pass (1 supported, 1 uncertain). Every claim is backed."
+    ) in report
+    assert "- **Uncertain:** It couldn't confirm the card. (No card details.)" in report
+    assert (
+        "- **Contradicted:** You'll get $10 back. (cancellation:5 says no refund.)"
+    ) in report
+    assert "No refund for the current period." not in report
+    assert "**Faithfulness:** error. The judge request failed: down" in report
+
+
+# Without --judge, the report is unchanged: no faithfulness column or section.
+def test_report_without_the_judge_has_no_faithfulness():
+    report = format_report([answered()], datetime(2026, 11, 9, tzinfo=UTC), "m")
+
+    assert "Nothing here is scored." in report
+    assert "Faithfulness" not in report

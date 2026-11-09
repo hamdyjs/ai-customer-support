@@ -290,6 +290,12 @@ The Markdown report lists each case's question and expected behavior next to wha
 uv run python -m scripts.evaluate_assistant --case kb-invoice-pdf --case multi-upgrade-annual > assistant_report.md
 ```
 
+To also have Claude judge whether each reply is faithful to the tool results behind it, add `--judge`. For each answered case, `claude-opus-5-5` reads the question, the reply and every tool result the assistant got, both help-article passages and the customer's records. It labels each factual claim in the reply as supported, unsupported, contradicted, or uncertain when the reply says it couldn't confirm something. A reply passes when no claim is unsupported or contradicted, and the report lists the claims that failed with the judge's reasons. The judge never sees the expected behavior or the golden dataset, so it checks faithfulness, not whether the answer is right. It's one more Claude call per case on a pricier model, so it only runs when you ask. A failed or malformed judgment shows as an error for that case without stopping the run. Evaluation runs are never traced in Langfuse, with or without the judge:
+
+```bash
+uv run python -m scripts.evaluate_assistant --judge > assistant_report.md
+```
+
 `eval/golden_dataset.json` holds the reference answer for each of the 12 cases, grounded in the seeded records and help articles. It repeats each case unchanged and adds the facts a complete answer must give, optional facts worth crediting, claims that make an answer wrong, and what the data can't establish. Facts are judged on meaning, not wording. `scripts/validate_golden_dataset.py` explains each field. To check the file after editing it, run the following. It makes no API calls:
 
 ```bash
@@ -337,6 +343,7 @@ scripts/
 ├── evaluate_assistant.py  # Runs the assistant end to end on the cases in eval/ for review
 ├── evaluate_retrieval.py  # Scores search against the labeled questions in eval/
 ├── ingest.py          # Chunks, embeds and stores the help articles in Qdrant
+├── judge_faithfulness.py  # Opt-in judge of whether replies match their tool results
 ├── search.py          # Searches the help articles from the command line
 └── validate_golden_dataset.py  # Checks the golden dataset against the assistant cases
 tests/

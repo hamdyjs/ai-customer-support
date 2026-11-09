@@ -14,7 +14,12 @@ Add --case with a case ID, once or more, to run only those cases.
 
 The report puts each answer, the tools used, what the searches returned and what
 was cited next to the case's expected behavior. It doesn't score the answers:
-judging them is left to the reader.
+judging them is left to the reader. Add --judge to also have Claude judge whether
+each reply is faithful to its tool results (see scripts/judge_faithfulness.py). That
+is one more Claude call per case on a pricier model, so it only runs when asked.
+
+Evaluation requests are never traced in Langfuse, so they don't mix with real
+customers' traces.
 """
 
 import argparse
@@ -25,6 +30,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -32,6 +38,7 @@ from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
 
+from anthropic import Anthropic
 from anthropic.types import ToolResultBlockParam, ToolUseBlock
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -45,6 +52,13 @@ from app.retrieval import (
     get_qdrant_client,
 )
 from app.tools import TOOL_DEFINITIONS
+from scripts.judge_faithfulness import (
+    JUDGE_MODEL,
+    ClaimVerdict,
+    FaithfulnessResult,
+    Verdict,
+    judge_faithfulness,
+)
 
 CASES_FILE = Path(__file__).resolve().parents[1] / "eval" / "assistant_cases.json"
 MESSAGES_URL = "/v1/support/messages"
@@ -108,6 +122,7 @@ class CaseResult:
     body: dict[str, Any]  # the API's JSON response
     tool_calls: list[ToolCall]
     elapsed_seconds: float
+    faithfulness: FaithfulnessResult | None = None  # set only when --judge is used
 
     def searches(self) -> list[Search]:
         searches = []
@@ -206,13 +221,18 @@ def run_cases(cases: list[AssistantCase]) -> list[CaseResult]:
     # Imported here, because the app picks its database from DATABASE_URL on import.
     from fastapi.testclient import TestClient
 
-    from app import ai
+    from app import ai, tracing
     from app.main import app
 
     client = TestClient(app, raise_server_exceptions=False)
     recorder = ToolRecorder(ai.run_tool_call)
     results = []
-    with patch.object(ai, "run_tool_call", recorder):
+    # Without Langfuse, evaluation requests are never traced, even when .env has its
+    # keys, so they can't mix with real customers' traces.
+    with (
+        patch.object(ai, "run_tool_call", recorder),
+        patch.object(tracing, "get_langfuse", return_value=None),
+    ):
         for number, case in enumerate(cases, start=1):
             print(f"[{number}/{len(cases)}] {case.id}", file=sys.stderr)
             recorder.calls = []
@@ -236,6 +256,27 @@ def run_cases(cases: list[AssistantCase]) -> list[CaseResult]:
                 )
             )
     return results
+
+
+def judge_results(results: list[CaseResult], client: Anthropic) -> None:
+    """Have Claude judge each reply against the tool results behind it.
+
+    The judge only gets the question, the reply and the tool results, never the
+    case's expected behavior or any golden data. Failed requests have no reply, so
+    they aren't judged.
+    """
+    answered = [result for result in results if result.status_code == 200]
+    for number, result in enumerate(answered, start=1):
+        print(f"[judge {number}/{len(answered)}] {result.case.id}", file=sys.stderr)
+        result.faithfulness = judge_faithfulness(
+            client, result.case.question, result.body["reply"], result.tool_calls
+        )
+    judged = [result.faithfulness for result in answered if result.faithfulness]
+    print(
+        f"The judge used {sum(f.input_tokens for f in judged)} input and "
+        f"{sum(f.output_tokens for f in judged)} output tokens.",
+        file=sys.stderr,
+    )
 
 
 def quote(text: str) -> str:
@@ -334,13 +375,51 @@ def format_case(result: CaseResult) -> str:
             ),
             "",
         ]
+        if result.faithfulness is not None:
+            lines += format_faithfulness(result.faithfulness)
     lines += ["**Review:**", "", REVIEW_CHECKLIST, ""]
     return "\n".join(lines)
+
+
+# The verdict with a count of each label, then the claims that need a look: the ones
+# that failed, and the ones where the reply said it couldn't confirm something.
+def format_faithfulness(faithfulness: FaithfulnessResult) -> list[str]:
+    if faithfulness.verdict == Verdict.error:
+        return [f"**Faithfulness:** error. {faithfulness.summary}", ""]
+    counts = Counter(claim.verdict for claim in faithfulness.claims)
+    breakdown = ", ".join(
+        f"{counts[label]} {label}" for label in ClaimVerdict if counts[label]
+    )
+    lines = [
+        (
+            f"**Faithfulness:** {faithfulness.verdict} "
+            f"({breakdown or 'no factual claims'}). {faithfulness.summary}"
+        ),
+        "",
+    ]
+    flagged = [
+        claim
+        for claim in faithfulness.claims
+        if claim.verdict != ClaimVerdict.supported
+    ]
+    for claim in flagged:
+        label = claim.verdict.capitalize()
+        lines.append(f"- **{label}:** {claim.claim} ({claim.explanation})")
+    if flagged:
+        lines.append("")
+    return lines
+
+
+def faithfulness_cell(result: CaseResult) -> str:
+    if result.faithfulness is None:
+        return "not judged"
+    return result.faithfulness.verdict
 
 
 def format_report(results: list[CaseResult], started_at: datetime, model: str) -> str:
     failed = sum(result.status_code != 200 for result in results)
     total_seconds = sum(result.elapsed_seconds for result in results)
+    judged = any(result.faithfulness is not None for result in results)
     lines = [
         "# Support assistant evaluation",
         "",
@@ -350,23 +429,46 @@ def format_report(results: list[CaseResult], started_at: datetime, model: str) -
             f"{total_seconds:.1f} s in total."
         ),
         "",
-        (
+    ]
+    if judged:
+        verdicts = Counter(faithfulness_cell(result) for result in results)
+        lines += [
+            (
+                f"Faithfulness judged by {JUDGE_MODEL}: {verdicts[Verdict.passed]} "
+                f"passed, {verdicts[Verdict.failed]} failed, "
+                f"{verdicts[Verdict.error]} judge errors, "
+                f"{verdicts['not judged']} not judged. A reply passes when every "
+                "claim in it is backed by its tool results."
+            ),
+            "",
+            (
+                "Only faithfulness is scored. For everything else, compare the reply "
+                "with the expected behavior and tick the review list."
+            ),
+        ]
+    else:
+        lines.append(
             "Nothing here is scored. For each case, compare the reply with the "
             "expected behavior and tick the review list."
-        ),
-        "",
-        "| Case | Category | Customer | HTTP | Tools used | Citations | Time |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
-    ]
+        )
+    header = "| Case | Category | Customer | HTTP | Tools used | Citations | Time |"
+    divider = "| --- | --- | --- | --- | --- | --- | --- |"
+    if judged:
+        header += " Faithfulness |"
+        divider += " --- |"
+    lines += ["", header, divider]
     for result in results:
         names = list(dict.fromkeys(call.name for call in result.tool_calls))
         citations = len(result.body.get("citations", []))
-        lines.append(
+        row = (
             f"| {result.case.id} | {CATEGORY_LABELS[result.case.category]} "
             f"| {result.case.customer_id} | {result.status_code} "
             f"| {', '.join(names) or 'none'} | {citations} "
             f"| {result.elapsed_seconds:.1f} s |"
         )
+        if judged:
+            row += f" {faithfulness_cell(result)} |"
+        lines.append(row)
     lines.append("")
     return "\n".join(lines) + "\n" + "\n".join(format_case(r) for r in results)
 
@@ -381,6 +483,14 @@ def main(argv: list[str] | None = None) -> int:
         dest="case_ids",
         metavar="ID",
         help="only run this case, and repeat it to run more",
+    )
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help=(
+            f"also have {JUDGE_MODEL} judge whether each reply is faithful to its "
+            "tool results, which costs one more Claude call per case"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -405,6 +515,8 @@ def main(argv: list[str] | None = None) -> int:
             [sys.executable, "-m", "app.db.seed"], check=True, stdout=sys.stderr
         )
         results = run_cases(cases)
+    if args.judge:
+        judge_results(results, Anthropic())
 
     from app.ai import MODEL
 
