@@ -8,7 +8,7 @@ import pytest
 from sqlmodel import Session
 
 from app import tracing
-from app.ai import get_llm_service
+from app.ai import RequestUsage, get_llm_service
 from app.db.database import get_session_factory
 from app.db.models import AccountStatus, Customer
 from app.main import app
@@ -357,7 +357,9 @@ def test_report_shows_faithfulness():
         "1 not judged."
     ) in report
     assert "| Time | Faithfulness |" in report
-    assert "| 1.0 s | fail |" in report and "| 1.0 s | not judged |" in report
+    assert "| 1.0 s | pass (1 supported, 1 uncertain) |" in report
+    assert "| 1.0 s | fail (1 contradicted) |" in report
+    assert "| 1.0 s | error |" in report and "| 1.0 s | not judged |" in report
     assert (
         "**Faithfulness:** pass (1 supported, 1 uncertain). Every claim is backed."
     ) in report
@@ -375,3 +377,75 @@ def test_report_without_the_judge_has_no_faithfulness():
 
     assert "Nothing here is scored." in report
     assert "Faithfulness" not in report
+
+
+# Each case gets its own total of the assistant's Claude calls and tokens for the cost
+# report, while the app still totals each request as usual.
+def test_run_cases_totals_each_cases_claude_calls(engine, knowledge_base, capsys):
+    add_customer(engine)
+    search = tool_call("search_knowledge_base", tool_input={"query": "refunds"})
+    claude = FakeClaude(
+        tool_response(search, usage={"input_tokens": 100, "output_tokens": 10}),
+        reply_response(
+            usage={
+                "input_tokens": 200,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 50,
+            }
+        ),
+        reply_response(usage={"input_tokens": 300, "output_tokens": 30}),
+    )
+    app.dependency_overrides[get_session_factory] = lambda: lambda: Session(engine)
+    app.dependency_overrides[get_llm_service] = claude.service
+    try:
+        first, second = run_cases([CASE, CASE.model_copy(update={"id": "other"})])
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first.usage == RequestUsage(2, 300, 30, 50, 0)
+    assert second.usage == RequestUsage(1, 300, 30, 0, 0)
+    output = capsys.readouterr().err
+    assert "[Request total] llm_calls=2 input_tokens=300" in output
+    assert "[Request total] llm_calls=1 input_tokens=300" in output
+
+
+# API errors and costs get their own section, apart from the verdicts: a failed
+# request and a judge error are listed as errors, a faithfulness failure isn't, and
+# the assistant's and the judge's costs are totalled and shown per case.
+def test_report_lists_api_errors_and_costs_apart_from_verdicts():
+    usage = RequestUsage(llm_calls=2, input_tokens=1_000_000, output_tokens=100_000)
+    unfaithful = answered()
+    unfaithful.usage = usage
+    unfaithful.faithfulness = FaithfulnessResult(
+        Verdict.failed,
+        "One claim isn't backed.",
+        [JudgedClaim(claim="A refund.", verdict="unsupported", explanation="None.")],
+        input_tokens=10_000,
+        output_tokens=1_000,
+    )
+    judge_error = answered()
+    judge_error.faithfulness = FaithfulnessResult(
+        Verdict.error, "The judge request failed: down"
+    )
+    request_error = CaseResult(CASE, 502, {"detail": "Down"}, [], 1.0, usage)
+
+    report = format_report(
+        [unfaithful, judge_error, request_error], datetime(2026, 11, 9, tzinfo=UTC), "m"
+    )
+    errors = report.split("**API errors:**")[1].split("**Assistant")[0]
+
+    assert "## API errors and costs" in report
+    assert errors == (
+        "\n\n- both-refund: The judge request failed: down\n"
+        "- both-refund: the assistant request failed with HTTP 502: Down\n\n"
+    )
+    assert (
+        "**Assistant (m):** 4 Claude calls, 2,000,000 input and 200,000 output "
+        "tokens, 0 cache reads and 0 cache writes: about $0.3000."
+    ) in report
+    assert (
+        f"**Judge ({JUDGE_MODEL}):** 2 judgments, 10,000 input and 1,000 output "
+        "tokens: about $0.0300."
+    ) in report
+    assert "| both-refund | 2 | $0.1500 | $0.0300 |" in report
+    assert "| both-refund | - | - | $0.0000 |" in report

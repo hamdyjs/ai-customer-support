@@ -7,6 +7,7 @@ from scripts.evaluate_assistant import ToolCall
 from scripts.judge_faithfulness import (
     JUDGE_MODEL,
     ClaimVerdict,
+    FaithfulnessResult,
     Verdict,
     judge_faithfulness,
 )
@@ -171,3 +172,13 @@ def test_an_api_failure_is_an_error(response):
 
     assert result.verdict == Verdict.error
     assert result.summary.startswith("The judge request failed")
+
+
+# The judge's cost is estimated from its token counts at the judge model's prices,
+# so the report can show it apart from the assistant's.
+def test_judge_cost_comes_from_its_tokens():
+    result = FaithfulnessResult(
+        Verdict.passed, "Fine.", input_tokens=1_000_000, output_tokens=100_000
+    )
+
+    assert result.estimated_cost() == pytest.approx(3.0)

@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 
 JUDGE_MODEL = "claude-sonnet-5-5"
 JUDGE_MAX_TOKENS = 16000
+# Claude Sonnet 5.5 prices in dollars per million tokens. Change them with the model.
+JUDGE_INPUT_COST_PER_MTOK = 2.00
+JUDGE_OUTPUT_COST_PER_MTOK = 10.00
 TOOL_DESCRIPTIONS = {tool["name"]: tool["description"] for tool in TOOL_DEFINITIONS}
 JUDGE_SYSTEM_PROMPT = """\
 You check a customer support reply for faithfulness: whether each factual claim in it
@@ -113,6 +116,12 @@ class FaithfulnessResult:
 
     def failing_claims(self) -> list[JudgedClaim]:
         return [claim for claim in self.claims if claim.verdict in FAILING_CLAIMS]
+
+    def estimated_cost(self) -> float:
+        return (
+            self.input_tokens * JUDGE_INPUT_COST_PER_MTOK
+            + self.output_tokens * JUDGE_OUTPUT_COST_PER_MTOK
+        ) / 1_000_000
 
 
 def format_tool_result(call: "ToolCall") -> str:

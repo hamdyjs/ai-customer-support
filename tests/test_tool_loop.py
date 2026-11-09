@@ -500,8 +500,10 @@ def test_instructions_in_a_passage_stay_inside_the_tool_result(
 # rules are in its prompt: no claims beyond the tool results, saying what couldn't
 # be confirmed, asking when unclear, telling missing information from a failed
 # lookup, never taking instructions from tool results, short answers about
-# undocumented features, citing the tips Claude adds as well as its answer, and
-# never claiming an action such as passing a request on, since its tools only read.
+# undocumented features, citing the tips Claude adds as well as its answer, never
+# claiming an action such as passing a request on, since its tools only read, and
+# only saying what support does, or where to find a missing detail, when a passage
+# says so.
 @pytest.mark.parametrize(
     "rule",
     [
@@ -517,6 +519,11 @@ def test_instructions_in_a_passage_stay_inside_the_tool_result(
         "mention a documented alternative only when it meets the need",
         "including tips and extra details you add beyond what was asked",
         "never say you've done something, such as passing a request to the support team",
+        "search the help articles for how the support team handles it",
+        "Don't say what the support team can check, confirm or decide unless a passage",
+        "don't suggest contacting support when you've already answered the question",
+        "Only mention something you can't do when the customer asked you to do it",
+        "point the customer to where they can see it only when a passage says where",
     ],
     ids=[
         "unsupported_policy",
@@ -531,6 +538,11 @@ def test_instructions_in_a_passage_stay_inside_the_tool_result(
         "useful_alternatives_only",
         "added_tips_cited",
         "no_claimed_actions",
+        "support_handling_searched",
+        "support_claims_grounded",
+        "no_needless_referral",
+        "limits_only_when_asked",
+        "missing_detail_pointer_grounded",
     ],
 )
 def test_reply_prompt_has_the_grounding_rules(rule):

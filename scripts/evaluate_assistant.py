@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import patch
 
 from anthropic import Anthropic
@@ -59,6 +59,10 @@ from scripts.judge_faithfulness import (
     Verdict,
     judge_faithfulness,
 )
+
+# Only for type hints: app.ai picks its database on import, so run_cases imports it.
+if TYPE_CHECKING:
+    from app.ai import RequestUsage
 
 CASES_FILE = Path(__file__).resolve().parents[1] / "eval" / "assistant_cases.json"
 MESSAGES_URL = "/v1/support/messages"
@@ -122,6 +126,7 @@ class CaseResult:
     body: dict[str, Any]  # the API's JSON response
     tool_calls: list[ToolCall]
     elapsed_seconds: float
+    usage: "RequestUsage | None" = None  # the assistant's Claude calls for the case
     faithfulness: FaithfulnessResult | None = None  # set only when --judge is used
 
     def searches(self) -> list[Search]:
@@ -226,16 +231,27 @@ def run_cases(cases: list[AssistantCase]) -> list[CaseResult]:
 
     client = TestClient(app, raise_server_exceptions=False)
     recorder = ToolRecorder(ai.run_tool_call)
+    add_usage = ai.RequestUsage.add
+    case_usage = ai.RequestUsage()
+
+    # Each Claude call still counts toward its request as usual, and also toward the
+    # case's own totals for the cost report.
+    def add_to_case(usage: "RequestUsage", response: Any) -> None:
+        add_usage(usage, response)
+        add_usage(case_usage, response)
+
     results = []
     # Without Langfuse, evaluation requests are never traced, even when .env has its
     # keys, so they can't mix with real customers' traces.
     with (
         patch.object(ai, "run_tool_call", recorder),
+        patch.object(ai.RequestUsage, "add", add_to_case),
         patch.object(tracing, "get_langfuse", return_value=None),
     ):
         for number, case in enumerate(cases, start=1):
             print(f"[{number}/{len(cases)}] {case.id}", file=sys.stderr)
             recorder.calls = []
+            case_usage = ai.RequestUsage()
             started = time.perf_counter()
             # The app prints each step of the request, which belongs with the
             # progress on stderr rather than in the report.
@@ -253,6 +269,7 @@ def run_cases(cases: list[AssistantCase]) -> list[CaseResult]:
                     response_body(response),
                     recorder.calls,
                     elapsed,
+                    case_usage,
                 )
             )
     return results
@@ -274,7 +291,8 @@ def judge_results(results: list[CaseResult], client: Anthropic) -> None:
     judged = [result.faithfulness for result in answered if result.faithfulness]
     print(
         f"The judge used {sum(f.input_tokens for f in judged)} input and "
-        f"{sum(f.output_tokens for f in judged)} output tokens.",
+        f"{sum(f.output_tokens for f in judged)} output tokens, about "
+        f"${sum(f.estimated_cost() for f in judged):.4f}.",
         file=sys.stderr,
     )
 
@@ -386,14 +404,10 @@ def format_case(result: CaseResult) -> str:
 def format_faithfulness(faithfulness: FaithfulnessResult) -> list[str]:
     if faithfulness.verdict == Verdict.error:
         return [f"**Faithfulness:** error. {faithfulness.summary}", ""]
-    counts = Counter(claim.verdict for claim in faithfulness.claims)
-    breakdown = ", ".join(
-        f"{counts[label]} {label}" for label in ClaimVerdict if counts[label]
-    )
     lines = [
         (
             f"**Faithfulness:** {faithfulness.verdict} "
-            f"({breakdown or 'no factual claims'}). {faithfulness.summary}"
+            f"({claim_breakdown(faithfulness)}). {faithfulness.summary}"
         ),
         "",
     ]
@@ -410,10 +424,100 @@ def format_faithfulness(faithfulness: FaithfulnessResult) -> list[str]:
     return lines
 
 
+def claim_breakdown(faithfulness: FaithfulnessResult) -> str:
+    counts = Counter(claim.verdict for claim in faithfulness.claims)
+    breakdown = ", ".join(
+        f"{counts[label]} {label}" for label in ClaimVerdict if counts[label]
+    )
+    return breakdown or "no factual claims"
+
+
 def faithfulness_cell(result: CaseResult) -> str:
     if result.faithfulness is None:
         return "not judged"
     return result.faithfulness.verdict
+
+
+def faithfulness_column(result: CaseResult) -> str:
+    faithfulness = result.faithfulness
+    if faithfulness is None or faithfulness.verdict == Verdict.error:
+        return faithfulness_cell(result)
+    return f"{faithfulness.verdict} ({claim_breakdown(faithfulness)})"
+
+
+def money(dollars: float) -> str:
+    return f"${dollars:.4f}"
+
+
+# Errors and costs are kept apart from the verdicts: an error means a reply or a
+# judgment is missing, not that a reply was unfaithful.
+def format_errors_and_costs(results: list[CaseResult], model: str) -> list[str]:
+    judged = any(result.faithfulness is not None for result in results)
+    errors = []
+    for result in results:
+        if result.status_code != 200:
+            detail = result.body.get("detail", result.body)
+            errors.append(
+                f"- {result.case.id}: the assistant request failed with HTTP "
+                f"{result.status_code}: {detail}"
+            )
+        if result.faithfulness and result.faithfulness.verdict == Verdict.error:
+            errors.append(f"- {result.case.id}: {result.faithfulness.summary}")
+    lines = [
+        "## API errors and costs",
+        "",
+        (
+            "Errors are counted apart from faithfulness failures, and the judge "
+            "doesn't count toward the assistant's cost."
+        ),
+        "",
+        "**API errors:**",
+        "",
+        *(errors or ["None"]),
+        "",
+    ]
+
+    usages = [result.usage for result in results if result.usage]
+    lines.append(
+        f"**Assistant ({model}):** {sum(u.llm_calls for u in usages)} Claude calls, "
+        f"{sum(u.input_tokens for u in usages):,} input and "
+        f"{sum(u.output_tokens for u in usages):,} output tokens, "
+        f"{sum(u.cache_read_tokens for u in usages):,} cache reads and "
+        f"{sum(u.cache_write_tokens for u in usages):,} cache writes: about "
+        f"{money(sum(u.estimated_cost() for u in usages))}."
+    )
+    header = "| Case | Assistant calls | Assistant cost |"
+    divider = "| --- | --- | --- |"
+    if judged:
+        judgments = [result.faithfulness for result in results if result.faithfulness]
+        lines.append(
+            f"\n**Judge ({JUDGE_MODEL}):** {len(judgments)} judgments, "
+            f"{sum(j.input_tokens for j in judgments):,} input and "
+            f"{sum(j.output_tokens for j in judgments):,} output tokens: about "
+            f"{money(sum(j.estimated_cost() for j in judgments))}."
+        )
+        header += " Judge cost |"
+        divider += " --- |"
+    lines += ["", header, divider]
+    for result in results:
+        usage = result.usage
+        row = (
+            f"| {result.case.id} | {usage.llm_calls if usage else '-'} "
+            f"| {money(usage.estimated_cost()) if usage else '-'} |"
+        )
+        if judged:
+            judgment = result.faithfulness
+            row += f" {money(judgment.estimated_cost()) if judgment else '-'} |"
+        lines.append(row)
+    lines += [
+        "",
+        (
+            "Costs are estimates from the list prices in app/ai.py and "
+            "scripts/judge_faithfulness.py."
+        ),
+        "",
+    ]
+    return lines
 
 
 def format_report(results: list[CaseResult], started_at: datetime, model: str) -> str:
@@ -467,9 +571,9 @@ def format_report(results: list[CaseResult], started_at: datetime, model: str) -
             f"| {result.elapsed_seconds:.1f} s |"
         )
         if judged:
-            row += f" {faithfulness_cell(result)} |"
+            row += f" {faithfulness_column(result)} |"
         lines.append(row)
-    lines.append("")
+    lines += ["", *format_errors_and_costs(results, model)]
     return "\n".join(lines) + "\n" + "\n".join(format_case(r) for r in results)
 
 
