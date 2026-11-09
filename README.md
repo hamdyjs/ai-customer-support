@@ -290,6 +290,12 @@ The Markdown report lists each case's question and expected behavior next to wha
 uv run python -m scripts.evaluate_assistant --case kb-invoice-pdf --case multi-upgrade-annual > assistant_report.md
 ```
 
+`eval/golden_dataset.json` holds the reference answer for each of the 12 cases, grounded in the seeded records and help articles. It repeats each case unchanged and adds the facts a complete answer must give, optional facts worth crediting, claims that make an answer wrong, and what the data can't establish. Facts are judged on meaning, not wording. `scripts/validate_golden_dataset.py` explains each field. To check the file after editing it, run the following. It makes no API calls:
+
+```bash
+uv run python -m scripts.validate_golden_dataset
+```
+
 ## Configuration
 
 | Setting                    | Required             | Purpose                                                                                                                    |
@@ -322,6 +328,7 @@ app/
 eval/
 ├── assistant_cases.json  # Questions for the end-to-end assistant evaluation, with expected behavior
 ├── baseline_report.txt   # Evaluation report from before any retrieval improvements
+├── golden_dataset.json   # Reference facts and prohibited claims for each assistant case
 └── retrieval_cases.json  # Customer questions labeled with the articles and chunks that answer them
 knowledge_base/        # Markdown help articles
 qdrant_storage/        # Qdrant's data from Docker, not committed
@@ -330,7 +337,8 @@ scripts/
 ├── evaluate_assistant.py  # Runs the assistant end to end on the cases in eval/ for review
 ├── evaluate_retrieval.py  # Scores search against the labeled questions in eval/
 ├── ingest.py          # Chunks, embeds and stores the help articles in Qdrant
-└── search.py          # Searches the help articles from the command line
+├── search.py          # Searches the help articles from the command line
+└── validate_golden_dataset.py  # Checks the golden dataset against the assistant cases
 tests/
 ```
 

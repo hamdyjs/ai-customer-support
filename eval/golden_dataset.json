@@ -1,0 +1,631 @@
+[
+  {
+    "id": "kb-invoice-pdf",
+    "category": "knowledge_base",
+    "customer_id": "cust_001",
+    "question": "How do I download my invoices as PDFs for my accountant?",
+    "expected_behavior": "Explains Settings > Billing > Invoices, selecting an invoice and Download PDF, and that ticking several and choosing Download selected gives one ZIP file. Cites the invoices article. Needs no account data.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": ["invoices"],
+    "expected_facts": [
+      {
+        "text": "Invoices are in Settings > Billing > Invoices.",
+        "sources": ["invoices"]
+      },
+      {
+        "text": "To get one invoice as a PDF, select the invoice and then select Download PDF.",
+        "sources": ["invoices"]
+      },
+      {
+        "text": "To download several at once, tick the invoices needed and select Download selected (it gives a single ZIP file).",
+        "sources": ["invoices"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "Invoices are listed newest first and can be found by date or invoice number.",
+        "sources": ["invoices"]
+      },
+      {
+        "text": "The account owner can always see invoices, and on the Business plan Admins can too.",
+        "sources": ["invoices"]
+      },
+      {
+        "text": "A copy of each invoice is emailed to the billing email address, which can be a different address, such as one the finance team uses. Support changes the billing email through a support ticket.",
+        "sources": ["invoices", "account-settings"]
+      }
+    ],
+    "prohibited_claims": [
+      "Says invoices can only be obtained by contacting support or opening a ticket.",
+      "Says several invoices have to be downloaded one at a time, or that Download selected gives separate files rather than one ZIP file.",
+      "Points to a different place in Flowdesk to download invoice PDFs instead of Settings > Billing > Invoices, such as Settings > Account or Export data."
+    ],
+    "cannot_establish": []
+  },
+  {
+    "id": "kb-payment-retries",
+    "category": "knowledge_base",
+    "customer_id": "cust_001",
+    "question": "If a card payment fails, when do you try again, and when would my account be suspended?",
+    "expected_behavior": "Says the first attempt is on the day the invoice is issued and there's one automatic retry on day 3, with no further automatic retries unless the card is updated. The invoice is due on day 7, overdue on day 8, and the account is suspended on day 37 if it's still unpaid. Cites the failed payments article. Doesn't describe this customer's account.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": ["failed-payments"],
+    "expected_facts": [
+      {
+        "text": "A failed payment is retried automatically once, 3 days after the invoice is issued (day 3).",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "After that retry there are no more automatic attempts unless the customer updates their card.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "If the invoice is still unpaid, the account is suspended 30 days after its due date, which is day 37 after it's issued. Either way of stating it counts, as does \"once the invoice is more than 30 days overdue\", the account settings article's wording.",
+        "sources": ["failed-payments"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The first payment attempt is made on the day the invoice is issued (day 0).",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "The invoice is due on day 7 and becomes overdue on day 8.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "A failed payment attempt doesn't charge the customer.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "The customer is emailed if the first attempt or the day 3 retry fails, and overdue notices are sent on days 8, 17 and 32.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "Updating the card in Settings > Billing > Payment method triggers a new attempt, usually within a day, or the invoice can be paid straight away with Pay now.",
+        "sources": ["account-settings", "failed-payments"]
+      },
+      {
+        "text": "The team keeps full access until the suspension. While suspended, only the Billing section of Settings can be reached, and no data is deleted.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "Paying all overdue invoices makes a suspended account active again, normally within an hour.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "A customer who needs more time can open a support ticket before the suspension date, though an extension isn't guaranteed.",
+        "sources": ["failed-payments"]
+      }
+    ],
+    "prohibited_claims": [
+      "Says there is more than one automatic retry, such as retries every day or until the account is suspended.",
+      "Gives a different suspension point, such as suspension as soon as a payment fails or as soon as the invoice is overdue.",
+      "Says a failed payment attempt charged the customer.",
+      "Describes this customer's own account as having a failed payment, an overdue invoice, or a suspension date. All of their invoices are paid."
+    ],
+    "cannot_establish": []
+  },
+  {
+    "id": "kb-transfer-owner",
+    "category": "knowledge_base",
+    "customer_id": "cust_001",
+    "question": "Our office manager is leaving. How do I make a coworker the main person in charge of our Flowdesk account?",
+    "expected_behavior": "Recognizes this as transferring ownership: the current owner goes to Settings > Team, selects Transfer ownership and picks a team member, who accepts by email. If the owner has already left, the customer opens a support ticket. Cites the account settings article.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": ["account-settings"],
+    "expected_facts": [
+      {
+        "text": "Making the coworker the person in charge is done by transferring account ownership.",
+        "sources": ["account-settings"]
+      },
+      {
+        "text": "The current owner goes to Settings > Team, selects Transfer ownership, and chooses another team member.",
+        "sources": ["account-settings"]
+      },
+      {
+        "text": "The new owner must accept the transfer by email.",
+        "sources": ["account-settings"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "An account has one owner.",
+        "sources": ["account-settings"]
+      },
+      {
+        "text": "If the owner has already left and can't do the transfer, the customer opens a support ticket and needs to show they're authorized to act for the company.",
+        "sources": ["account-settings"]
+      },
+      {
+        "text": "After the transfer, the previous owner becomes an Admin on Business, or a Member on other plans.",
+        "sources": ["account-settings"]
+      },
+      {
+        "text": "The coworker has to be a team member. Someone new can be invited from Settings > Team with Invite member, and invitations expire after 7 days.",
+        "sources": ["account-settings"]
+      },
+      {
+        "text": "Someone who leaves can be removed in Settings > Team with Remove from team. Their tasks stay in the projects, and automation rules they created keep running unless they depend on an integration that person connected.",
+        "sources": ["account-settings"]
+      }
+    ],
+    "prohibited_claims": [
+      "Says the assistant can transfer ownership, or that it has started the transfer.",
+      "Presents giving the coworker the Admin role, or another role change, as the way to make them the person in charge.",
+      "Says an account can have more than one owner.",
+      "Says the account must be closed, a new subscription started, or the owner's sign-in email changed to hand the account over.",
+      "States that the person asking is, or isn't, the account owner."
+    ],
+    "cannot_establish": [
+      "Who the account owner is, or whether the coworker is already a team member. The account data has no roles or team list, so the answer shouldn't assume either."
+    ]
+  },
+  {
+    "id": "account-amount-owed",
+    "category": "account",
+    "customer_id": "cust_006",
+    "question": "Do I owe you anything right now?",
+    "expected_behavior": "Looks up invoices and reports two unpaid ones: inv_031 for $19.00 (October, overdue) and inv_032 for $19.00 (November, open), $38.00 in total. Any help-article facts it adds, such as how to pay, are cited.",
+    "expected_tools": ["get_invoices"],
+    "expected_articles": [],
+    "expected_facts": [
+      {
+        "text": "Yes, two invoices are unpaid.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "The October invoice (inv_031, October 1 to November 1) for $19.00 is unpaid and overdue.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "The November invoice (inv_032, November 1 to December 1) for $19.00 is unpaid.",
+        "sources": ["get_invoices"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The total owed is $38.00.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "The October invoice was due on October 8, 2026. The November invoice is open, not overdue, and due on November 8, 2026.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "The July, August and September invoices are paid.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "Both payment attempts on the October invoice, on October 1 and October 4, failed with insufficient_funds, so nothing was charged.",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "To pay, go to Settings > Billing > Invoices, select the invoice and select Pay now, paying the oldest invoice first.",
+        "sources": ["invoices", "failed-payments"]
+      },
+      {
+        "text": "Automatic payment is paused while an invoice is overdue, so the open November invoice also needs to be paid with Pay now.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "If the October invoice is still unpaid 30 days after its October 8 due date, which is November 7, 2026, the account is suspended.",
+        "sources": ["get_invoices", "failed-payments"]
+      }
+    ],
+    "prohibited_claims": [
+      "Says nothing is owed, or that the account is fully paid up.",
+      "Leaves either unpaid invoice out of what's owed, gives a total other than $38.00, or counts a paid invoice as owed. Splitting it into $19.00 overdue now and $19.00 due on November 8 is fine.",
+      "Says the November invoice (inv_032) is overdue. Its recorded status is open.",
+      "Says the account is currently suspended.",
+      "Adds late fees, interest or other extra charges. None are documented.",
+      "Says the failed payment attempts on the October invoice charged the customer."
+    ],
+    "cannot_establish": []
+  },
+  {
+    "id": "account-open-tickets",
+    "category": "account",
+    "customer_id": "cust_007",
+    "question": "What's happening with my open support tickets?",
+    "expected_behavior": "Lists the two unresolved tickets: Automation rules not running (open, high priority) and Help connecting an integration (in progress, medium priority). Leaves out the resolved ticket or clearly marks it as resolved. No citations unless it adds help-article facts.",
+    "expected_tools": ["get_support_tickets"],
+    "expected_articles": [],
+    "expected_facts": [
+      {
+        "text": "The ticket \"Automation rules not running\" (ticket_014, high priority) is open.",
+        "sources": ["get_support_tickets"]
+      },
+      {
+        "text": "The ticket \"Help connecting an integration\" (ticket_013, medium priority) is in progress.",
+        "sources": ["get_support_tickets"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The automation ticket was opened on October 30, 2026, and the integration ticket on October 25, 2026.",
+        "sources": ["get_support_tickets"]
+      },
+      {
+        "text": "The earlier ticket \"Adding more team members\" (ticket_012) was resolved on April 11, 2026.",
+        "sources": ["get_support_tickets"]
+      },
+      {
+        "text": "Open means the ticket is waiting for a specialist to pick it up. In progress means a specialist is working on it, or waiting on a confirmation or a third party.",
+        "sources": ["support-tickets"]
+      },
+      {
+        "text": "On the Business plan, the first-response targets are 4 business hours for high priority and 1 business day for medium priority, and Business tickets go ahead of others with the same priority.",
+        "sources": ["get_subscription", "support-tickets"]
+      },
+      {
+        "text": "The customer can add information by replying to the ticket's email or commenting on the ticket page, and can check status in Help > My tickets.",
+        "sources": ["support-tickets"]
+      }
+    ],
+    "prohibited_claims": [
+      "Presents the resolved \"Adding more team members\" ticket as open or still being worked on.",
+      "Swaps the statuses or priorities of the two unresolved tickets.",
+      "Invents progress beyond what the statuses mean, replies from support, or a resolution date for either ticket.",
+      "Says the assistant has escalated, updated or reprioritized a ticket.",
+      "States a cause for the automation rules stopping as a fact about this account, such as a suspension, a downgrade or a failed payment. The account is on a paid annual Business plan."
+    ],
+    "cannot_establish": [
+      "Whether support has replied on either ticket, what they've found, or when the tickets will be resolved. The ticket records only have a subject, description, status, priority and dates, though In progress does show a specialist has picked up the integration ticket."
+    ]
+  },
+  {
+    "id": "both-duplicate-refund",
+    "category": "knowledge_base_and_account",
+    "customer_id": "cust_002",
+    "question": "I think I was charged twice this month. Will I get the extra payment back?",
+    "expected_behavior": "Finds two successful $49.00 payments (pay_011 and pay_012) on invoice inv_011, two minutes apart on November 1, and calls it a possible duplicate. From the refunds article: support reviews it and refunds the extra payment in full if it's confirmed. Doesn't promise the refund. Recommends human review. Cites the refunds article.",
+    "expected_tools": ["get_payments", "search_knowledge_base"],
+    "expected_articles": ["refunds-and-duplicate-charges"],
+    "expected_facts": [
+      {
+        "text": "Two successful $49.00 payments were taken for the same November invoice (inv_011; pay_011 at 09:14 and pay_012 at 09:16 UTC on November 1, two minutes apart).",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "This is a possible duplicate charge.",
+        "sources": ["get_payments", "refunds-and-duplicate-charges"]
+      },
+      {
+        "text": "Getting the extra payment back depends on the support team's review: if they confirm a duplicate, the extra payment is refunded (in full).",
+        "sources": ["refunds-and-duplicate-charges"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "Support needs the invoice number, both payment numbers, and the date and amount of each charge, reported within 90 days of the charge.",
+        "sources": ["refunds-and-duplicate-charges"]
+      },
+      {
+        "text": "The customer already has an open, high-priority ticket about this, \"Unexpected subscription charge\" (ticket_002), opened on November 1, so they can add those details there rather than opening a new ticket.",
+        "sources": ["get_support_tickets", "support-tickets"]
+      },
+      {
+        "text": "Support aims to finish the review within 2 business days, and tickets about an incorrect charge are treated as high priority.",
+        "sources": ["refunds-and-duplicate-charges"]
+      },
+      {
+        "text": "Refunds go back to the original payment method and usually take 5 to 10 business days to appear.",
+        "sources": ["refunds-and-duplicate-charges"]
+      },
+      {
+        "text": "Each earlier invoice, July to October, had a single successful payment, which is normal monthly billing.",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "The customer should contact support before filing a dispute or chargeback with their bank.",
+        "sources": ["refunds-and-duplicate-charges"]
+      }
+    ],
+    "prohibited_claims": [
+      "Promises or guarantees a refund, or says a refund has been approved or issued.",
+      "States that the second payment is a confirmed duplicate rather than a possible one.",
+      "Says the customer wasn't charged twice, or explains the two payments away as a retry after a failed attempt or a pending bank authorization. Both payments succeeded.",
+      "Treats two different monthly invoices, such as October's and November's, as the duplicate.",
+      "Says both payments, $98.00, would be refunded.",
+      "Says the assistant has opened a ticket or passed the request to the support team."
+    ],
+    "cannot_establish": [
+      "Whether the second payment is a confirmed duplicate, and whether a refund will be issued. Only the support team's review can settle this."
+    ]
+  },
+  {
+    "id": "both-cancel-refund",
+    "category": "knowledge_base_and_account",
+    "customer_id": "cust_005",
+    "question": "I cancelled recently. Do I get money back for the rest of the month, and until when can my team still use Flowdesk?",
+    "expected_behavior": "From the account: the monthly Pro subscription was cancelled on November 1 and access continues until December 1, 2026. From the articles: monthly plans aren't refunded for unused time. Doesn't promise a refund. Cites the cancellation or refunds article for the policy, not for the dates.",
+    "expected_tools": ["get_subscription", "search_knowledge_base"],
+    "expected_articles": ["cancellation", "refunds-and-duplicate-charges"],
+    "expected_facts": [
+      {
+        "text": "No money comes back for the rest of the month: monthly plans aren't refunded for unused time after cancelling.",
+        "sources": ["cancellation", "refunds-and-duplicate-charges"]
+      },
+      {
+        "text": "The team can keep using Flowdesk until December 1, 2026 (the end of the current billing period; \"through November 30\" says the same).",
+        "sources": ["get_subscription"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The monthly Pro subscription was cancelled on November 1, 2026.",
+        "sources": ["get_subscription"]
+      },
+      {
+        "text": "They cancelled on their November 1 renewal date, so that day's $49.00 renewal charge (inv_027) still applied, and it pays for access until December 1.",
+        "sources": ["get_subscription", "get_invoices", "cancellation"]
+      },
+      {
+        "text": "The subscription still shows as Active until December 1, when its status changes to Canceled.",
+        "sources": ["get_subscription", "cancellation"]
+      },
+      {
+        "text": "They won't be charged again, and no invoice is issued on December 1.",
+        "sources": ["cancellation"]
+      },
+      {
+        "text": "All plan features, including integrations and automation rules, keep working until access ends.",
+        "sources": ["cancellation"]
+      },
+      {
+        "text": "After access ends, the data is kept for 90 days with projects read-only, and can still be exported. After that the project data is permanently deleted, though billing records are kept.",
+        "sources": ["cancellation"]
+      },
+      {
+        "text": "They can undo the cancellation before access ends with Keep subscription in Settings > Billing > Subscription.",
+        "sources": ["cancellation"]
+      }
+    ],
+    "prohibited_claims": [
+      "Promises or suggests a full or prorated refund for the rest of November.",
+      "Applies the annual plan's 30-day refund rule to this monthly subscription.",
+      "Says full access has already ended, ends on the cancellation date, or ends at any other time than December 1, 2026. \"Through November 30\" means the same, and the 90 days of read-only access to the data afterwards isn't continued use.",
+      "Says they'll be charged again on December 1."
+    ],
+    "cannot_establish": []
+  },
+  {
+    "id": "gap-pause-subscription",
+    "category": "insufficient_or_ambiguous",
+    "customer_id": "cust_001",
+    "question": "Can I pause my subscription for two months while my team is away?",
+    "expected_behavior": "The articles don't cover pausing a subscription. Says briefly that it couldn't confirm this, without saying pausing isn't possible or isn't offered. Mentions a documented alternative, with a citation, only if it helps, such as cancelling and resubscribing within 90 days to keep the data. Short. Likely recommends human review.",
+    "expected_tools": ["search_knowledge_base"],
+    "expected_articles": [],
+    "expected_facts": [
+      {
+        "text": "Whether the subscription can be paused is left open, with neither a yes nor a no. Any natural wording counts, such as not being able to confirm it, not having information about pausing, or the help articles not covering it.",
+        "sources": ["search_knowledge_base"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The help articles not mentioning pausing doesn't mean it isn't offered.",
+        "sources": ["search_knowledge_base"]
+      },
+      {
+        "text": "A documented alternative is to cancel and start a new subscription within 90 days of access ending. Access continues until the end of the paid period, the data is kept read-only for those 90 days, and it's restored once the first new payment succeeds.",
+        "sources": ["cancellation"]
+      },
+      {
+        "text": "The support team can be asked through a support ticket.",
+        "sources": ["support-tickets"]
+      }
+    ],
+    "prohibited_claims": [
+      "States or implies that pausing doesn't exist, such as saying it isn't possible, isn't offered or isn't available, or that Flowdesk has no pause option.",
+      "Treats the missing documentation as evidence against pausing, such as saying pausing doesn't seem to be an option because the articles don't mention it, or presenting cancelling as the only option rather than as an alternative.",
+      "States or implies that pausing is possible, or gives steps or a setting for pausing a subscription.",
+      "Says the assistant has paused the subscription or will arrange a pause.",
+      "Says that cancelling and resubscribing keeps the projects editable, or integrations and automation rules running, during the break.",
+      "Says cancelling refunds the unused part of the current month."
+    ],
+    "cannot_establish": [
+      "Whether Flowdesk lets a subscription be paused, and on what terms. No help article covers pausing, and that's a gap in the documentation, not evidence that pausing isn't offered."
+    ]
+  },
+  {
+    "id": "gap-card-details",
+    "category": "insufficient_or_ambiguous",
+    "customer_id": "cust_001",
+    "question": "Which card was charged for my November invoice, and when does that card expire?",
+    "expected_behavior": "Can confirm the $49.00 November payment succeeded, but says it can't see card details or expiry dates. Never invents a card brand, last four digits or date. May point to Settings > Billing > Payment method with a citation.",
+    "expected_tools": ["get_payments"],
+    "expected_articles": [],
+    "expected_facts": [
+      {
+        "text": "It can't tell which card was charged for the November invoice.",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "It can't tell when that card expires.",
+        "sources": ["get_payments"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The $49.00 payment for the November invoice (pay_006 on inv_006) succeeded on November 1, 2026.",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "Saved cards are under Settings > Billing > Payment method.",
+        "sources": ["account-settings", "failed-payments"]
+      },
+      {
+        "text": "Updating the card before it expires, or adding a backup card, helps prevent failed payments.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "A card number should never be sent in a support ticket or chat.",
+        "sources": ["account-settings"]
+      }
+    ],
+    "prohibited_claims": [
+      "Says which card was charged, by brand, last four digits or cardholder name, or gives its expiry date.",
+      "Says the card is expired, about to expire, or not about to expire.",
+      "Says the November payment failed or is still pending.",
+      "Asks the customer to share their card number."
+    ],
+    "cannot_establish": [
+      "Which card, by brand or last four digits, paid the November invoice.",
+      "When that card expires."
+    ]
+  },
+  {
+    "id": "ambiguous-which-invoice",
+    "category": "insufficient_or_ambiguous",
+    "customer_id": "cust_006",
+    "question": "Is my invoice paid?",
+    "expected_behavior": "The customer has paid, overdue and open invoices, so the question is ambiguous. Either asks which invoice they mean, or briefly gives the status of each recent one (inv_031 overdue, inv_032 open, earlier ones paid) without guessing which one they meant.",
+    "expected_tools": ["get_invoices"],
+    "expected_articles": [],
+    "clarifying_question_acceptable": true,
+    "expected_facts": [
+      {
+        "text": "The October invoice (inv_031, $19.00) isn't paid and is overdue.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "The November invoice (inv_032, $19.00) isn't paid yet.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "The earlier invoices (July, August and September) are paid.",
+        "sources": ["get_invoices"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The October invoice was due on October 8, 2026. The November invoice is open, not overdue, and due on November 8, 2026.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "Both payment attempts on the October invoice failed with insufficient_funds.",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "An open or overdue invoice can be paid in Settings > Billing > Invoices by selecting it and selecting Pay now.",
+        "sources": ["invoices", "failed-payments"]
+      }
+    ],
+    "prohibited_claims": [
+      "Picks one invoice and answers a plain yes or no, as if the question clearly meant that invoice.",
+      "Says all of the customer's invoices are paid.",
+      "Says the October invoice (inv_031) is paid.",
+      "Says the November invoice (inv_032) is overdue. Its recorded status is open."
+    ],
+    "cannot_establish": ["Which invoice the customer means by \"my invoice\"."]
+  },
+  {
+    "id": "multi-upgrade-annual",
+    "category": "multi_part",
+    "customer_id": "cust_004",
+    "question": "Why did my charges go up in October, when is my next payment, and how much would I save a year by switching to annual billing?",
+    "expected_behavior": "Answers all three parts. The customer moved from Starter ($19.00) to Pro ($49.00) on October 1, their renewal date, so October's charge was $49.00 at full price. The next payment is $49.00 on December 1, 2026. get_subscription returns Pro's monthly and annual prices, so the saving ($588.00 a year monthly against $490.00 annual, $98.00) can come from account data without a search or citation. Any help-article facts it adds, such as how switching works, are cited.",
+    "expected_tools": ["get_subscription", "get_invoices"],
+    "expected_articles": [],
+    "expected_facts": [
+      {
+        "text": "Charges went up because the customer upgraded from Starter to Pro on October 1, 2026 (Starter $19.00 a month, Pro $49.00 a month; October's invoice inv_021 was $49.00).",
+        "sources": ["get_subscription", "get_invoices"]
+      },
+      {
+        "text": "The next payment is on December 1, 2026 ($49.00).",
+        "sources": ["get_subscription", "get_invoices"]
+      },
+      {
+        "text": "Switching Pro to annual billing would save $98.00 a year ($490.00 a year instead of 12 x $49.00 = $588.00).",
+        "sources": ["get_subscription"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "October's $49.00 was Pro's full monthly price: the upgrade fell on their renewal date, when the Starter period ended, so there was no prorated charge.",
+        "sources": ["get_subscription", "get_invoices", "subscription-changes"]
+      },
+      {
+        "text": "The November invoice (inv_022) for $49.00 is already paid.",
+        "sources": ["get_invoices"]
+      },
+      {
+        "text": "The old Starter subscription shows as Expired, which is normal after an upgrade and doesn't mean the service lapsed.",
+        "sources": ["get_subscription", "subscription-changes"]
+      },
+      {
+        "text": "An annual subscription costs the same as ten months of monthly billing.",
+        "sources": ["subscription-changes"]
+      },
+      {
+        "text": "Switching from monthly to annual takes effect immediately and starts a new 12-month period. The annual price is reduced by a credit for the unused days of the current month, and the renewal date moves to one year from the switch.",
+        "sources": ["subscription-changes"]
+      }
+    ],
+    "prohibited_claims": [
+      "Attributes the October increase to a prorated upgrade charge, a duplicate charge, a price rise, added team members, or tax.",
+      "Gives a next payment date other than December 1, 2026, or an amount other than $49.00, for the subscription as it stands.",
+      "Gives an annual saving other than $98.00, such as Starter's $38.00 or Business's $198.00.",
+      "Says the switch to annual billing has been made, or that the assistant can make it."
+    ],
+    "cannot_establish": []
+  },
+  {
+    "id": "multi-failed-then-card",
+    "category": "multi_part",
+    "customer_id": "cust_003",
+    "question": "Was I charged twice in October? And how do I update my card so a payment doesn't fail again?",
+    "expected_behavior": "Answers both parts. For October's $19.00 invoice inv_015, the October 1 attempt failed because the card had expired and didn't charge them, and the October 3 retry succeeded, so they were charged once. To update the card: Settings > Billing > Payment method, then Add card, which becomes the main card. Cites the article for the card steps.",
+    "expected_tools": ["get_payments", "search_knowledge_base"],
+    "expected_articles": ["account-settings"],
+    "expected_facts": [
+      {
+        "text": "No, they were charged once for October ($19.00, invoice inv_015).",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "There were two attempts: the first failed and didn't charge them, and the second succeeded (pay_016 failed on October 1, pay_017 succeeded on October 3).",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "To update the card, go to Settings > Billing > Payment method and select Add card.",
+        "sources": ["account-settings"]
+      }
+    ],
+    "optional_facts": [
+      {
+        "text": "The October 1 attempt failed because the card had expired.",
+        "sources": ["get_payments"]
+      },
+      {
+        "text": "The new card becomes the main card, and the old one can be removed.",
+        "sources": ["account-settings"]
+      },
+      {
+        "text": "Updating the card before it expires, or adding a backup card that's used only if the main card fails, helps prevent failed payments.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "Some banks briefly show a pending authorization for a failed attempt. It isn't a completed charge and normally disappears within a few business days.",
+        "sources": ["failed-payments"]
+      },
+      {
+        "text": "A card number should never be sent in a support ticket or chat.",
+        "sources": ["account-settings"]
+      }
+    ],
+    "prohibited_claims": [
+      "Says they were charged twice, or that the failed attempt took money.",
+      "Calls the October payments a possible duplicate charge or suggests a refund review for them.",
+      "Says the card on file is currently expired. The October 3 and November 1 payments succeeded.",
+      "Calls the October 3 payment the scheduled automatic retry. That retry falls on day 3, October 4, so the October 3 attempt came earlier.",
+      "Gives a different place to update the card, such as Settings > Profile or Settings > Account.",
+      "Offers to update the card in the chat, or asks for the card number."
+    ],
+    "cannot_establish": []
+  }
+]
