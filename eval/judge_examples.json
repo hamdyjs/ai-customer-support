@@ -1,0 +1,230 @@
+[
+  {
+    "case_id": "both-duplicate-refund",
+    "customer_id": "cust_002",
+    "question": "I think I was charged twice this month. Will I get the extra payment back?",
+    "evidence": [
+      {
+        "tool": "get_payments",
+        "input": {},
+        "output": [
+          {
+            "id": "pay_012",
+            "invoice_id": "inv_011",
+            "amount_cents": 4900,
+            "status": "succeeded",
+            "attempted_at": "2026-11-01T09:16:00Z",
+            "failure_reason": null
+          },
+          {
+            "id": "pay_011",
+            "invoice_id": "inv_011",
+            "amount_cents": 4900,
+            "status": "succeeded",
+            "attempted_at": "2026-11-01T09:14:00Z",
+            "failure_reason": null
+          },
+          {
+            "id": "pay_010",
+            "invoice_id": "inv_010",
+            "amount_cents": 4900,
+            "status": "succeeded",
+            "attempted_at": "2026-10-01T07:13:00Z",
+            "failure_reason": null
+          },
+          {
+            "id": "pay_009",
+            "invoice_id": "inv_009",
+            "amount_cents": 4900,
+            "status": "succeeded",
+            "attempted_at": "2026-09-01T06:01:00Z",
+            "failure_reason": null
+          },
+          {
+            "id": "pay_008",
+            "invoice_id": "inv_008",
+            "amount_cents": 4900,
+            "status": "succeeded",
+            "attempted_at": "2026-08-01T15:27:00Z",
+            "failure_reason": null
+          },
+          {
+            "id": "pay_007",
+            "invoice_id": "inv_007",
+            "amount_cents": 4900,
+            "status": "succeeded",
+            "attempted_at": "2026-07-01T14:05:00Z",
+            "failure_reason": null
+          }
+        ]
+      },
+      {
+        "tool": "search_knowledge_base",
+        "input": {
+          "query": "duplicate charge refund"
+        },
+        "output": [
+          {
+            "id": "refunds-and-duplicate-charges:2",
+            "document_id": "refunds-and-duplicate-charges",
+            "title": "Refunds and Duplicate Charges",
+            "section_heading": "Was I charged twice? > A real duplicate charge",
+            "source": "refunds-and-duplicate-charges.md",
+            "text": "Refunds and Duplicate Charges\nWas I charged twice? > A real duplicate charge\n\nA duplicate charge usually looks like two successful payments of the same amount, made close together, on one invoice. For example, two $49.00 payments for one invoice, at 09:14 and 09:16 on November 1. You should only have paid once for that billing period, so the second payment needs review."
+          },
+          {
+            "id": "refunds-and-duplicate-charges:12",
+            "document_id": "refunds-and-duplicate-charges",
+            "title": "Refunds and Duplicate Charges",
+            "section_heading": "Disputing a charge with your bank",
+            "source": "refunds-and-duplicate-charges.md",
+            "text": "Refunds and Duplicate Charges\nDisputing a charge with your bank\n\nPlease contact us before filing a dispute or chargeback. We can usually sort it out faster, and a chargeback can pause your account while your bank investigates."
+          },
+          {
+            "id": "refunds-and-duplicate-charges:5",
+            "document_id": "refunds-and-duplicate-charges",
+            "title": "Refunds and Duplicate Charges",
+            "section_heading": "Reporting a duplicate charge > What happens next",
+            "source": "refunds-and-duplicate-charges.md",
+            "text": "Refunds and Duplicate Charges\nReporting a duplicate charge > What happens next\n\n1. Support confirms both payments were successfully collected.\n2. If they find a duplicate, support refunds the extra payment in full.\n3. We email you to confirm, and you can reply to the ticket with any questions.\n\nWe aim to finish the review within 2 business days. Tickets about an incorrect charge are treated as high priority."
+          },
+          {
+            "id": "failed-payments:18",
+            "document_id": "failed-payments",
+            "title": "Failed Payments and Overdue Invoices",
+            "section_heading": "Think you were charged twice?",
+            "source": "failed-payments.md",
+            "text": "Failed Payments and Overdue Invoices\nThink you were charged twice?\n\nA failed attempt followed by a successful one isn't a double charge. If your invoice shows **two successful payments**, see [Refunds and Duplicate Charges](refunds-and-duplicate-charges.md)."
+          },
+          {
+            "id": "refunds-and-duplicate-charges:1",
+            "document_id": "refunds-and-duplicate-charges",
+            "title": "Refunds and Duplicate Charges",
+            "section_heading": "Was I charged twice?",
+            "source": "refunds-and-duplicate-charges.md",
+            "text": "Refunds and Duplicate Charges\nWas I charged twice?\n\nGo to **Settings > Billing > Invoices** and open the invoice for the charge you're asking about. Then compare what you see with this table.\n\n| What the invoice shows                             | Is it a duplicate?                                |\n| Two **successful** payments on the same invoice    | **Possibly yes.** Report it to support.           |\n| One failed payment and one successful payment      | No. The failed attempt didn't charge you.         |\n| Several failed payments and one successful payment | No. Only the successful payment charged you.      |\n| Two invoices for different billing periods         | No. Those are two separate months or terms.       |\n| A regular invoice and a smaller upgrade invoice    | No. The smaller one is a prorated upgrade charge. |"
+          }
+        ]
+      }
+    ],
+    "supported_answer": "Your payments show two successful $49.00 payments on the same invoice, inv_011: pay_011 at 09:14 and pay_012 at 09:16 UTC on November 1. Two successful payments of the same amount, made close together on one invoice, are a possible duplicate charge, and the second one needs review.\n\nWhether you get the extra payment back depends on the support team's review. They confirm both payments were collected, and if they find a duplicate, they refund the extra payment in full and email you to confirm. They aim to finish the review within 2 business days. If you were thinking of disputing the charge with your bank, please contact support first, as a chargeback can pause your account while the bank investigates.",
+    "flawed_answer": "Yes, you'll get it back. Your payments show two successful $49.00 payments on the same invoice, inv_011: pay_011 at 09:14 and pay_012 at 09:16 UTC on November 1. That's a duplicate charge, so the extra $49.00 will be refunded in full, and you'll get an email to confirm. The support team aims to finish the review within 2 business days.",
+    "flaw": "It promises the refund. \"Yes, you'll get it back\" and \"That's a duplicate charge, so the extra $49.00 will be refunded\" state the outcome as certain, but the evidence only says two successful payments on one invoice are possibly a duplicate that needs review, and that support refunds the extra payment if their review finds a duplicate. Nothing in it confirms this charge is a duplicate or that a refund will be issued. Everything else in the answer is backed by the payments and the passages."
+  },
+  {
+    "case_id": "kb-payment-retries",
+    "customer_id": "cust_001",
+    "question": "If a card payment fails, when do you try again, and when would my account be suspended?",
+    "evidence": [
+      {
+        "tool": "search_knowledge_base",
+        "input": {
+          "query": "day 3 retry and overdue invoice timeline"
+        },
+        "output": [
+          {
+            "id": "failed-payments:5",
+            "document_id": "failed-payments",
+            "title": "Failed Payments and Overdue Invoices",
+            "section_heading": "What happens after a payment fails",
+            "source": "failed-payments.md",
+            "text": "Failed Payments and Overdue Invoices\nWhat happens after a payment fails\n\nHere's the timeline for an invoice issued on day 0.\n\n| Day       | What happens                                                                            | Invoice status |\n| 0         | The invoice is issued and we make the first payment attempt. If it fails, we email you. | Open           |\n| 3         | We retry automatically, once. If this fails, we email you again.                        | Open           |\n| 7         | The invoice is due.                                                                     | Open           |\n| 8         | The invoice becomes overdue and we send the first overdue notice.                       | Overdue        |\n| 17 and 32 | We send further overdue notices.                                                        | Overdue        |\n| 37        | If it's still unpaid, your account is suspended.                                        | Overdue        |"
+          },
+          {
+            "id": "failed-payments:8",
+            "document_id": "failed-payments",
+            "title": "Failed Payments and Overdue Invoices",
+            "section_heading": "What happens after a payment fails > Example: insufficient funds",
+            "source": "failed-payments.md",
+            "text": "Failed Payments and Overdue Invoices\nWhat happens after a payment fails > Example: insufficient funds\n\nThe attempts on October 1 and October 4 both fail with `insufficient_funds`. The invoice is due on October 8, and it becomes **Overdue** once that date has passed. Your account remains active, but you'll need to pay the invoice to avoid suspension."
+          },
+          {
+            "id": "failed-payments:6",
+            "document_id": "failed-payments",
+            "title": "Failed Payments and Overdue Invoices",
+            "section_heading": "What happens after a payment fails",
+            "source": "failed-payments.md",
+            "text": "Failed Payments and Overdue Invoices\nWhat happens after a payment fails\n\nWe send further overdue notices.                                                        | Overdue        |\n| 37        | If it's still unpaid, your account is suspended.                                        | Overdue        |\n\nAfter the day 3 retry, we don't try again automatically unless you update your card. It's up to you to pay the invoice or add a working card."
+          },
+          {
+            "id": "failed-payments:13",
+            "document_id": "failed-payments",
+            "title": "Failed Payments and Overdue Invoices",
+            "section_heading": "Overdue invoices > Need more time?",
+            "source": "failed-payments.md",
+            "text": "Failed Payments and Overdue Invoices\nOverdue invoices > Need more time?\n\n[Open a support ticket](support-tickets.md) before the suspension date. The support team can review your situation, but payment extensions aren't guaranteed."
+          },
+          {
+            "id": "failed-payments:9",
+            "document_id": "failed-payments",
+            "title": "Failed Payments and Overdue Invoices",
+            "section_heading": "Overdue invoices",
+            "source": "failed-payments.md",
+            "text": "Failed Payments and Overdue Invoices\nOverdue invoices\n\nAn invoice becomes overdue when it's unpaid after its due date, 7 days after it was issued."
+          }
+        ]
+      }
+    ],
+    "supported_answer": "We make the first payment attempt on the day the invoice is issued (day 0). If it fails, we email you and retry automatically once, on day 3, and email you again if that fails too. After the day 3 retry, we don't try again automatically unless you update your card, so it's up to you to pay the invoice or add a working card.\n\nThe invoice is due on day 7 and becomes overdue on day 8, when we send the first overdue notice, with more notices on days 17 and 32. If it's still unpaid on day 37, your account is suspended. If you need more time, open a support ticket before the suspension date, though payment extensions aren't guaranteed.",
+    "flawed_answer": "We make the first payment attempt on the day the invoice is issued (day 0). If it fails, we email you and keep retrying automatically every 3 days until the payment goes through.\n\nThe invoice is due on day 7 and becomes overdue on day 8, when we send the first overdue notice, with more notices on days 17 and 32. If it's still unpaid on day 37, your account is suspended.",
+    "flaw": "It gets the retries wrong. \"Keep retrying automatically every 3 days until the payment goes through\" contradicts the evidence, which says there is one automatic retry, on day 3, and that after it no further automatic attempts are made unless the customer updates their card. The rest of the timeline is correct."
+  },
+  {
+    "case_id": "gap-pause-subscription",
+    "customer_id": "cust_001",
+    "question": "Can I pause my subscription for two months while my team is away?",
+    "evidence": [
+      {
+        "tool": "search_knowledge_base",
+        "input": {
+          "query": "pause subscription"
+        },
+        "output": [
+          {
+            "id": "cancellation:13",
+            "document_id": "cancellation",
+            "title": "Canceling Your Subscription",
+            "section_heading": "Changing your mind > Before your access ends",
+            "source": "cancellation.md",
+            "text": "Canceling Your Subscription\nChanging your mind > Before your access ends\n\nGo to **Settings > Billing > Subscription** and select **Keep subscription**. The cancellation is removed, your subscription continues as if nothing happened, and you'll be charged as normal on your renewal date."
+          },
+          {
+            "id": "cancellation:3",
+            "document_id": "cancellation",
+            "title": "Canceling Your Subscription",
+            "section_heading": "When your access ends > Your subscription still shows as Active",
+            "source": "cancellation.md",
+            "text": "Canceling Your Subscription\nWhen your access ends > Your subscription still shows as Active\n\nThis is expected. A canceled subscription stays **Active** until the paid period ends, with a cancellation date shown alongside it. Once the period ends, the status changes to **Canceled**.\n\nFor example, if you're on a monthly plan and cancel on November 1, with your billing period running from November 1 to December 1:\n\n| Date             | What happens                                                           |\n| November 1       | Your cancellation is recorded. Your status stays Active.               |\n| November 2 to 30 | You and your team keep full access.                                    |\n| December 1       | Access ends and your status changes to Canceled. No invoice is issued. |"
+          },
+          {
+            "id": "cancellation:2",
+            "document_id": "cancellation",
+            "title": "Canceling Your Subscription",
+            "section_heading": "When your access ends",
+            "source": "cancellation.md",
+            "text": "Canceling Your Subscription\nWhen your access ends\n\nYour access ends when your current billing period ends. This date is shown as your **access end date** on the Subscription page.\n\n- **Monthly plans:** access continues until the end of your current monthly billing period.\n- **Annual plans:** access continues until the end of your annual term, even if that's many months away.\n\nYour team can keep working normally until then. All plan features remain available, including integrations and automation rules."
+          },
+          {
+            "id": "cancellation:14",
+            "document_id": "cancellation",
+            "title": "Canceling Your Subscription",
+            "section_heading": "Changing your mind > After your access ends",
+            "source": "cancellation.md",
+            "text": "Canceling Your Subscription\nChanging your mind > After your access ends\n\nWithin the 90-day retention period, you can start a new subscription from **Settings > Billing > Subscription**. Your data is restored as soon as your first payment succeeds. You'll pay for the new plan from that day, and your new billing period starts then.\n\nAfter 90 days your data is gone, so you'd need to sign up again and start fresh."
+          },
+          {
+            "id": "cancellation:0",
+            "document_id": "cancellation",
+            "title": "Canceling Your Subscription",
+            "section_heading": null,
+            "source": "cancellation.md",
+            "text": "Canceling Your Subscription\n\nYou can cancel your Flowdesk subscription at any time. When you cancel, you keep access until the end of the period you've already paid for, and you won't be charged again."
+          }
+        ]
+      }
+    ],
+    "supported_answer": "I couldn't find anything about pausing a subscription in the help articles, so I can't confirm whether that's possible.\n\nOne documented option is to cancel. You keep access until the end of the period you've already paid for, and you won't be charged again. After your access ends, you can start a new subscription from Settings > Billing > Subscription within the 90-day retention period, and your data is restored as soon as your first payment succeeds. Your new billing period starts then.",
+    "flawed_answer": "Flowdesk doesn't offer a way to pause a subscription, so the only option is to cancel. You keep access until the end of the period you've already paid for, and you won't be charged again. After your access ends, you can start a new subscription from Settings > Billing > Subscription within the 90-day retention period, and your data is restored as soon as your first payment succeeds.",
+    "flaw": "It treats missing documentation as proof. \"Flowdesk doesn't offer a way to pause a subscription, so the only option is to cancel\" isn't backed by the evidence: none of the passages mention pausing at all, which leaves the question open rather than showing that pausing isn't offered. The cancel-and-resubscribe details are backed by the passages."
+  }
+]
