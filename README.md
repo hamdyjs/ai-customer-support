@@ -290,7 +290,7 @@ The Markdown report lists each case's question and expected behavior next to wha
 uv run python -m scripts.evaluate_assistant --case kb-invoice-pdf --case multi-upgrade-annual > assistant_report.md
 ```
 
-To also have Claude judge whether each reply is faithful to the tool results behind it, add `--judge`. For each answered case, `claude-opus-5-5` reads the question, the reply and every tool result the assistant got, both help-article passages and the customer's records. It labels each factual claim in the reply as supported, unsupported, contradicted, or uncertain when the reply says it couldn't confirm something. A reply passes when no claim is unsupported or contradicted, and the report lists the claims that failed with the judge's reasons. The judge never sees the expected behavior or the golden dataset, so it checks faithfulness, not whether the answer is right. It's one more Claude call per case on a pricier model, so it only runs when you ask. A failed or malformed judgment shows as an error for that case without stopping the run. Evaluation runs are never traced in Langfuse, with or without the judge:
+To also have Claude judge whether each reply is faithful to the tool results behind it, add `--judge`. For each answered case, the judge model set in `scripts/judge_faithfulness.py` (`claude-sonnet-5-5`) reads the question, the reply and every tool result the assistant got, both help-article passages and the customer's records. It labels each factual claim in the reply as supported, unsupported, contradicted, or uncertain when the reply says it couldn't confirm something. A reply passes when no claim is unsupported or contradicted, and the report lists the claims that failed with the judge's reasons. The judge never sees the expected behavior or the golden dataset, so it checks faithfulness, not whether the answer is right. It's one more Claude call per case on a pricier model, so it only runs when you ask. A failed or malformed judgment shows as an error for that case without stopping the run. Evaluation runs are never traced in Langfuse, with or without the judge:
 
 ```bash
 uv run python -m scripts.evaluate_assistant --judge > assistant_report.md
@@ -300,6 +300,12 @@ uv run python -m scripts.evaluate_assistant --judge > assistant_report.md
 
 ```bash
 uv run python -m scripts.validate_golden_dataset
+```
+
+To also check each reply against the golden dataset, add `--correctness`. The same judge model gets the question, the reply and the case's golden expectations, never the tool results. It checks, on meaning rather than wording, whether the reply gets each required fact across, makes any prohibited claim, or claims an answer to something the data can't establish, and lists any other claim that contradicts the golden facts. A reply passes when it has every required fact and breaks no expectation. Optional facts never count against it, and where a case accepts a clarifying question, asking one stands in for the required facts. Correctness has its own verdict, column and section in the report, apart from faithfulness, and costs one more Claude call per case, so it only runs when you ask. Use both flags for both checks:
+
+```bash
+uv run python -m scripts.evaluate_assistant --judge --correctness > assistant_report.md
 ```
 
 ## Configuration
@@ -343,6 +349,7 @@ scripts/
 ├── evaluate_assistant.py  # Runs the assistant end to end on the cases in eval/ for review
 ├── evaluate_retrieval.py  # Scores search against the labeled questions in eval/
 ├── ingest.py          # Chunks, embeds and stores the help articles in Qdrant
+├── judge_correctness.py   # Opt-in judge of replies against the golden dataset
 ├── judge_faithfulness.py  # Opt-in judge of whether replies match their tool results
 ├── search.py          # Searches the help articles from the command line
 └── validate_golden_dataset.py  # Checks the golden dataset against the assistant cases

@@ -17,6 +17,9 @@ was cited next to the case's expected behavior. It doesn't score the answers:
 judging them is left to the reader. Add --judge to also have Claude judge whether
 each reply is faithful to its tool results (see scripts/judge_faithfulness.py). That
 is one more Claude call per case on a pricier model, so it only runs when asked.
+Add --correctness to have the same model check each reply against the golden
+dataset's expectations (see scripts/judge_correctness.py), with its own verdict and
+another call per case.
 
 Evaluation requests are never traced in Langfuse, so they don't mix with real
 customers' traces.
@@ -31,7 +34,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,6 +55,7 @@ from app.retrieval import (
     get_qdrant_client,
 )
 from app.tools import TOOL_DEFINITIONS
+from scripts.judge_correctness import CorrectnessResult, Finding, judge_correctness
 from scripts.judge_faithfulness import (
     JUDGE_MODEL,
     ClaimVerdict,
@@ -63,6 +67,17 @@ from scripts.judge_faithfulness import (
 # Only for type hints: app.ai picks its database on import, so run_cases imports it.
 if TYPE_CHECKING:
     from app.ai import RequestUsage
+    from scripts.validate_golden_dataset import GoldenCase
+
+JudgeResult = FaithfulnessResult | CorrectnessResult
+PASS_RULES = {
+    "Faithfulness": "A reply passes when every claim in it is backed by its tool results.",
+    "Correctness": (
+        "A reply passes when it gets every required fact across, or asks a clarifying "
+        "question where the case accepts one, and makes no prohibited, unestablished "
+        "or incorrect claim."
+    ),
+}
 
 CASES_FILE = Path(__file__).resolve().parents[1] / "eval" / "assistant_cases.json"
 MESSAGES_URL = "/v1/support/messages"
@@ -128,6 +143,7 @@ class CaseResult:
     elapsed_seconds: float
     usage: "RequestUsage | None" = None  # the assistant's Claude calls for the case
     faithfulness: FaithfulnessResult | None = None  # set only when --judge is used
+    correctness: CorrectnessResult | None = None  # set only with --correctness
 
     def searches(self) -> list[Search]:
         searches = []
@@ -288,11 +304,34 @@ def judge_results(results: list[CaseResult], client: Anthropic) -> None:
         result.faithfulness = judge_faithfulness(
             client, result.case.question, result.body["reply"], result.tool_calls
         )
-    judged = [result.faithfulness for result in answered if result.faithfulness]
+    print_judge_usage("faithfulness", [result.faithfulness for result in answered])
+
+
+def judge_correctness_results(
+    results: list[CaseResult], golden: dict[str, "GoldenCase"], client: Anthropic
+) -> None:
+    """Have Claude check each reply against its case's golden expectations.
+
+    This judge gets the question, the reply and the golden expectations, never the
+    tool results or the faithfulness verdict. Failed requests aren't judged.
+    """
+    answered = [result for result in results if result.status_code == 200]
+    for number, result in enumerate(answered, start=1):
+        print(
+            f"[correctness {number}/{len(answered)}] {result.case.id}", file=sys.stderr
+        )
+        result.correctness = judge_correctness(
+            client, golden[result.case.id], result.body["reply"]
+        )
+    print_judge_usage("correctness", [result.correctness for result in answered])
+
+
+def print_judge_usage(name: str, judgments: Sequence[JudgeResult | None]) -> None:
+    judged = [judgment for judgment in judgments if judgment]
     print(
-        f"The judge used {sum(f.input_tokens for f in judged)} input and "
-        f"{sum(f.output_tokens for f in judged)} output tokens, about "
-        f"${sum(f.estimated_cost() for f in judged):.4f}.",
+        f"The {name} judge used {sum(j.input_tokens for j in judged)} input and "
+        f"{sum(j.output_tokens for j in judged)} output tokens, about "
+        f"${sum(j.estimated_cost() for j in judged):.4f}.",
         file=sys.stderr,
     )
 
@@ -395,6 +434,8 @@ def format_case(result: CaseResult) -> str:
         ]
         if result.faithfulness is not None:
             lines += format_faithfulness(result.faithfulness)
+        if result.correctness is not None:
+            lines += format_correctness(result.correctness)
     lines += ["**Review:**", "", REVIEW_CHECKLIST, ""]
     return "\n".join(lines)
 
@@ -445,30 +486,85 @@ def faithfulness_column(result: CaseResult) -> str:
     return f"{faithfulness.verdict} ({claim_breakdown(faithfulness)})"
 
 
+# The golden expectations a reply missed or broke, labelled by kind.
+def correctness_findings(correctness: CorrectnessResult) -> list[tuple[str, Finding]]:
+    groups = [
+        ("Missing", correctness.missing_facts),
+        ("Prohibited claim", correctness.prohibited_claims),
+        ("Answered what can't be established", correctness.unestablished),
+        ("Incorrect", correctness.incorrect_claims),
+    ]
+    return [(label, finding) for label, findings in groups for finding in findings]
+
+
+def format_correctness(correctness: CorrectnessResult) -> list[str]:
+    if correctness.verdict == Verdict.error:
+        return [f"**Correctness:** error. {correctness.summary}", ""]
+    clarified = " with an accepted clarifying question" if correctness.clarified else ""
+    lines = [
+        f"**Correctness:** {correctness.verdict}{clarified}. {correctness.summary}",
+        "",
+    ]
+    findings = correctness_findings(correctness)
+    for label, finding in findings:
+        lines.append(f"- **{label}:** {finding.expectation} ({finding.explanation})")
+    if findings:
+        lines.append("")
+    return lines
+
+
+def correctness_column(result: CaseResult) -> str:
+    correctness = result.correctness
+    if correctness is None:
+        return "not judged"
+    if correctness.verdict == Verdict.error:
+        return correctness.verdict
+    counts = Counter(label for label, _ in correctness_findings(correctness))
+    details = [f"{count} {label.lower()}" for label, count in counts.items()]
+    if correctness.clarified:
+        details.insert(0, "clarifying question")
+    return f"{correctness.verdict} ({', '.join(details)})" if details else "pass"
+
+
 def money(dollars: float) -> str:
     return f"${dollars:.4f}"
 
 
+# Each judge that ran, with its result for every case, in report order.
+def judges_used(
+    results: list[CaseResult],
+) -> list[tuple[str, list[JudgeResult | None]]]:
+    judges: list[tuple[str, list[JudgeResult | None]]] = [
+        ("Faithfulness", [result.faithfulness for result in results]),
+        ("Correctness", [result.correctness for result in results]),
+    ]
+    return [(name, judgments) for name, judgments in judges if any(judgments)]
+
+
 # Errors and costs are kept apart from the verdicts: an error means a reply or a
-# judgment is missing, not that a reply was unfaithful.
+# judgment is missing, not that a reply was unfaithful or wrong.
 def format_errors_and_costs(results: list[CaseResult], model: str) -> list[str]:
-    judged = any(result.faithfulness is not None for result in results)
+    judges = judges_used(results)
     errors = []
-    for result in results:
+    for index, result in enumerate(results):
         if result.status_code != 200:
             detail = result.body.get("detail", result.body)
             errors.append(
                 f"- {result.case.id}: the assistant request failed with HTTP "
                 f"{result.status_code}: {detail}"
             )
-        if result.faithfulness and result.faithfulness.verdict == Verdict.error:
-            errors.append(f"- {result.case.id}: {result.faithfulness.summary}")
+        for name, judgments in judges:
+            judgment = judgments[index]
+            if judgment and judgment.verdict == Verdict.error:
+                errors.append(
+                    f"- {result.case.id}: {name.lower()} judge: {judgment.summary}"
+                )
     lines = [
         "## API errors and costs",
         "",
         (
-            "Errors are counted apart from faithfulness failures, and the judge "
-            "doesn't count toward the assistant's cost."
+            "Errors are counted apart from faithfulness and correctness failures, "
+            "and the judges don't count toward the assistant's cost."
         ),
         "",
         "**API errors:**",
@@ -488,25 +584,25 @@ def format_errors_and_costs(results: list[CaseResult], model: str) -> list[str]:
     )
     header = "| Case | Assistant calls | Assistant cost |"
     divider = "| --- | --- | --- |"
-    if judged:
-        judgments = [result.faithfulness for result in results if result.faithfulness]
+    for name, judgments in judges:
+        done = [judgment for judgment in judgments if judgment]
         lines.append(
-            f"\n**Judge ({JUDGE_MODEL}):** {len(judgments)} judgments, "
-            f"{sum(j.input_tokens for j in judgments):,} input and "
-            f"{sum(j.output_tokens for j in judgments):,} output tokens: about "
-            f"{money(sum(j.estimated_cost() for j in judgments))}."
+            f"\n**{name} judge ({JUDGE_MODEL}):** {len(done)} judgments, "
+            f"{sum(j.input_tokens for j in done):,} input and "
+            f"{sum(j.output_tokens for j in done):,} output tokens: about "
+            f"{money(sum(j.estimated_cost() for j in done))}."
         )
-        header += " Judge cost |"
+        header += f" {name} judge cost |"
         divider += " --- |"
     lines += ["", header, divider]
-    for result in results:
+    for index, result in enumerate(results):
         usage = result.usage
         row = (
             f"| {result.case.id} | {usage.llm_calls if usage else '-'} "
             f"| {money(usage.estimated_cost()) if usage else '-'} |"
         )
-        if judged:
-            judgment = result.faithfulness
+        for _, judgments in judges:
+            judgment = judgments[index]
             row += f" {money(judgment.estimated_cost()) if judgment else '-'} |"
         lines.append(row)
     lines += [
@@ -523,7 +619,7 @@ def format_errors_and_costs(results: list[CaseResult], model: str) -> list[str]:
 def format_report(results: list[CaseResult], started_at: datetime, model: str) -> str:
     failed = sum(result.status_code != 200 for result in results)
     total_seconds = sum(result.elapsed_seconds for result in results)
-    judged = any(result.faithfulness is not None for result in results)
+    judges = judges_used(results)
     lines = [
         "# Support assistant evaluation",
         "",
@@ -534,22 +630,24 @@ def format_report(results: list[CaseResult], started_at: datetime, model: str) -
         ),
         "",
     ]
-    if judged:
-        verdicts = Counter(faithfulness_cell(result) for result in results)
+    for name, judgments in judges:
+        verdicts = Counter(j.verdict if j else "not judged" for j in judgments)
         lines += [
             (
-                f"Faithfulness judged by {JUDGE_MODEL}: {verdicts[Verdict.passed]} "
+                f"{name} judged by {JUDGE_MODEL}: {verdicts[Verdict.passed]} "
                 f"passed, {verdicts[Verdict.failed]} failed, "
                 f"{verdicts[Verdict.error]} judge errors, "
-                f"{verdicts['not judged']} not judged. A reply passes when every "
-                "claim in it is backed by its tool results."
+                f"{verdicts['not judged']} not judged. {PASS_RULES[name]}"
             ),
             "",
-            (
-                "Only faithfulness is scored. For everything else, compare the reply "
-                "with the expected behavior and tick the review list."
-            ),
         ]
+    if judges:
+        scored = " and ".join(name.lower() for name, _ in judges)
+        verb = "are" if len(judges) > 1 else "is"
+        lines.append(
+            f"Only {scored} {verb} scored. For everything else, compare the reply "
+            "with the expected behavior and tick the review list."
+        )
     else:
         lines.append(
             "Nothing here is scored. For each case, compare the reply with the "
@@ -557,8 +655,8 @@ def format_report(results: list[CaseResult], started_at: datetime, model: str) -
         )
     header = "| Case | Category | Customer | HTTP | Tools used | Citations | Time |"
     divider = "| --- | --- | --- | --- | --- | --- | --- |"
-    if judged:
-        header += " Faithfulness |"
+    for name, _ in judges:
+        header += f" {name} |"
         divider += " --- |"
     lines += ["", header, divider]
     for result in results:
@@ -570,8 +668,12 @@ def format_report(results: list[CaseResult], started_at: datetime, model: str) -
             f"| {', '.join(names) or 'none'} | {citations} "
             f"| {result.elapsed_seconds:.1f} s |"
         )
-        if judged:
-            row += f" {faithfulness_column(result)} |"
+        columns = {
+            "Faithfulness": faithfulness_column,
+            "Correctness": correctness_column,
+        }
+        for name, _ in judges:
+            row += f" {columns[name](result)} |"
         lines.append(row)
     lines += ["", *format_errors_and_costs(results, model)]
     return "\n".join(lines) + "\n" + "\n".join(format_case(r) for r in results)
@@ -596,6 +698,14 @@ def main(argv: list[str] | None = None) -> int:
             "tool results, which costs one more Claude call per case"
         ),
     )
+    parser.add_argument(
+        "--correctness",
+        action="store_true",
+        help=(
+            f"also have {JUDGE_MODEL} check each reply against the golden dataset, "
+            "which costs one more Claude call per case"
+        ),
+    )
     args = parser.parse_args(argv)
 
     load_dotenv()
@@ -604,6 +714,19 @@ def main(argv: list[str] | None = None) -> int:
     except EvaluationError as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
+    golden: dict[str, GoldenCase] = {}
+    if args.correctness:
+        # Imported here, because it imports this module. Its EvaluationError is this
+        # module's, even when this one runs as __main__.
+        from scripts import validate_golden_dataset
+
+        try:
+            golden = {
+                case.id: case for case in validate_golden_dataset.load_golden_cases()
+            }
+        except validate_golden_dataset.EvaluationError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 1
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY isn't set. Add it to your .env file.", file=sys.stderr)
         return 1
@@ -619,8 +742,12 @@ def main(argv: list[str] | None = None) -> int:
             [sys.executable, "-m", "app.db.seed"], check=True, stdout=sys.stderr
         )
         results = run_cases(cases)
-    if args.judge:
-        judge_results(results, Anthropic())
+    if args.judge or args.correctness:
+        client = Anthropic()
+        if args.judge:
+            judge_results(results, client)
+        if args.correctness:
+            judge_correctness_results(results, golden, client)
 
     from app.ai import MODEL
 

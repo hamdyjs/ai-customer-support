@@ -27,6 +27,7 @@ from scripts.evaluate_assistant import (
     select_cases,
 )
 from scripts.ingest import KNOWLEDGE_BASE_DIR
+from scripts.judge_correctness import CorrectnessResult, Finding
 from scripts.judge_faithfulness import (
     JUDGE_MODEL,
     FaithfulnessResult,
@@ -301,15 +302,31 @@ def test_judge_results_judges_replies_only_from_tool_results():
     assert failed.faithfulness is None
 
 
-# The judge only runs, and only costs money, when --judge is passed. Without it,
-# nothing is judged and the report has no faithfulness section.
-@pytest.mark.parametrize(("argv", "judge"), [([], False), (["--judge"], True)])
-def test_the_judge_runs_only_when_asked(monkeypatch, capsys, argv, judge):
+# Each judge only runs, and only costs money, when its own flag is passed: --judge
+# for faithfulness and --correctness for correctness, which gets the case's golden
+# expectations. Without a flag, that judge's section is left out of the report.
+@pytest.mark.parametrize(
+    ("argv", "faithfulness", "correctness"),
+    [
+        ([], False, False),
+        (["--judge"], True, False),
+        (["--correctness"], False, True),
+        (["--judge", "--correctness"], True, True),
+    ],
+)
+def test_each_judge_runs_only_when_asked(
+    monkeypatch, capsys, argv, faithfulness, correctness
+):
     calls = []
+    correctness_cases = []
 
     def fake_judge(client, question, reply, tool_calls):
         calls.append(question)
         return judged(Verdict.passed, "Every claim is backed.")
+
+    def fake_correctness_judge(client, case, reply):
+        correctness_cases.append(case)
+        return CorrectnessResult(Verdict.passed, "Every required fact is there.")
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", "sqlite://")
@@ -320,11 +337,16 @@ def test_the_judge_runs_only_when_asked(monkeypatch, capsys, argv, judge):
         evaluate_assistant, "run_cases", lambda cases: [answered(c) for c in cases]
     )
     monkeypatch.setattr(evaluate_assistant, "judge_faithfulness", fake_judge)
+    monkeypatch.setattr(evaluate_assistant, "judge_correctness", fake_correctness_judge)
 
     assert main([*argv, "--case", "kb-invoice-pdf"]) == 0
 
-    assert len(calls) == (1 if judge else 0)
-    assert ("**Faithfulness:**" in capsys.readouterr().out) is judge
+    report = capsys.readouterr().out
+    assert len(calls) == (1 if faithfulness else 0)
+    assert len(correctness_cases) == (1 if correctness else 0)
+    assert all(case.expected_facts for case in correctness_cases)
+    assert ("**Faithfulness:**" in report) is faithfulness
+    assert ("**Correctness:**" in report) is correctness
 
 
 # A judged report counts the verdicts, adds a column for them, and lists the claims
@@ -371,12 +393,67 @@ def test_report_shows_faithfulness():
     assert "**Faithfulness:** error. The judge request failed: down" in report
 
 
-# Without --judge, the report is unchanged: no faithfulness column or section.
-def test_report_without_the_judge_has_no_faithfulness():
+# Without either judge, the report is unchanged: no verdict columns or sections.
+def test_report_without_the_judges_has_no_verdicts():
     report = format_report([answered()], datetime(2026, 11, 9, tzinfo=UTC), "m")
 
     assert "Nothing here is scored." in report
-    assert "Faithfulness" not in report
+    assert "Faithfulness" not in report and "Correctness" not in report
+
+
+# A correctness report counts the verdicts in their own line and column, apart from
+# faithfulness, and lists each missed or broken golden expectation with the judge's
+# reason. An accepted clarifying question is shown as such.
+def test_report_shows_correctness():
+    complete = answered()
+    complete.correctness = CorrectnessResult(Verdict.passed, "Gets everything across.")
+    clarified = answered()
+    clarified.correctness = CorrectnessResult(
+        Verdict.passed, "Asks which invoice.", clarified=True
+    )
+    wrong = answered()
+    wrong.correctness = CorrectnessResult(
+        Verdict.failed,
+        "Misses the total and invents a fee.",
+        missing_facts=[Finding("Yes, two invoices are unpaid.", "Not stated.")],
+        prohibited_claims=[Finding("Adds late fees.", "Mentions a $5 fee.")],
+        unestablished=[Finding("When that card expires.", "Gives 08/27.")],
+        incorrect_claims=[Finding("inv_032 is overdue.", "It's open.")],
+    )
+    errored = answered()
+    errored.correctness = CorrectnessResult(
+        Verdict.error, "The judge returned no judgment: stop_reason=refusal"
+    )
+
+    report = format_report(
+        [complete, clarified, wrong, errored], datetime(2026, 11, 9, tzinfo=UTC), "m"
+    )
+
+    assert (
+        f"Correctness judged by {JUDGE_MODEL}: 2 passed, 1 failed, 1 judge errors, "
+        "0 not judged."
+    ) in report
+    assert "Only correctness is scored." in report and "Faithfulness" not in report
+    assert "| Time | Correctness |" in report
+    assert "| 1.0 s | pass |" in report
+    assert "| 1.0 s | pass (clarifying question) |" in report
+    assert (
+        "| 1.0 s | fail (1 missing, 1 prohibited claim, "
+        "1 answered what can't be established, 1 incorrect) |"
+    ) in report
+    assert (
+        "**Correctness:** pass with an accepted clarifying question. Asks which invoice."
+    ) in report
+    assert "- **Missing:** Yes, two invoices are unpaid. (Not stated.)" in report
+    assert "- **Prohibited claim:** Adds late fees. (Mentions a $5 fee.)" in report
+    assert (
+        "- **Answered what can't be established:** When that card expires. "
+        "(Gives 08/27.)"
+    ) in report
+    assert "- **Incorrect:** inv_032 is overdue. (It's open.)" in report
+    assert (
+        "**Correctness:** error. The judge returned no judgment: stop_reason=refusal"
+    ) in report
 
 
 # Each case gets its own total of the assistant's Claude calls and tokens for the cost
@@ -410,8 +487,9 @@ def test_run_cases_totals_each_cases_claude_calls(engine, knowledge_base, capsys
 
 
 # API errors and costs get their own section, apart from the verdicts: a failed
-# request and a judge error are listed as errors, a faithfulness failure isn't, and
-# the assistant's and the judge's costs are totalled and shown per case.
+# request and each judge's errors are listed as errors, a faithfulness or correctness
+# failure isn't, and the assistant's and each judge's costs are totalled and shown
+# per case.
 def test_report_lists_api_errors_and_costs_apart_from_verdicts():
     usage = RequestUsage(llm_calls=2, input_tokens=1_000_000, output_tokens=100_000)
     unfaithful = answered()
@@ -423,20 +501,34 @@ def test_report_lists_api_errors_and_costs_apart_from_verdicts():
         input_tokens=10_000,
         output_tokens=1_000,
     )
-    judge_error = answered()
-    judge_error.faithfulness = FaithfulnessResult(
+    unfaithful.correctness = CorrectnessResult(
+        Verdict.failed,
+        "Misses a fact.",
+        missing_facts=[Finding("A fact.", "Not stated.")],
+        input_tokens=20_000,
+        output_tokens=2_000,
+    )
+    judge_errors = answered()
+    judge_errors.faithfulness = FaithfulnessResult(
         Verdict.error, "The judge request failed: down"
+    )
+    judge_errors.correctness = CorrectnessResult(
+        Verdict.error, "The judge returned no judgment: stop_reason=refusal"
     )
     request_error = CaseResult(CASE, 502, {"detail": "Down"}, [], 1.0, usage)
 
     report = format_report(
-        [unfaithful, judge_error, request_error], datetime(2026, 11, 9, tzinfo=UTC), "m"
+        [unfaithful, judge_errors, request_error],
+        datetime(2026, 11, 9, tzinfo=UTC),
+        "m",
     )
     errors = report.split("**API errors:**")[1].split("**Assistant")[0]
 
     assert "## API errors and costs" in report
     assert errors == (
-        "\n\n- both-refund: The judge request failed: down\n"
+        "\n\n- both-refund: faithfulness judge: The judge request failed: down\n"
+        "- both-refund: correctness judge: The judge returned no judgment: "
+        "stop_reason=refusal\n"
         "- both-refund: the assistant request failed with HTTP 502: Down\n\n"
     )
     assert (
@@ -444,8 +536,14 @@ def test_report_lists_api_errors_and_costs_apart_from_verdicts():
         "tokens, 0 cache reads and 0 cache writes: about $0.3000."
     ) in report
     assert (
-        f"**Judge ({JUDGE_MODEL}):** 2 judgments, 10,000 input and 1,000 output "
-        "tokens: about $0.0300."
+        f"**Faithfulness judge ({JUDGE_MODEL}):** 2 judgments, 10,000 input and "
+        "1,000 output tokens: about $0.0300."
     ) in report
-    assert "| both-refund | 2 | $0.1500 | $0.0300 |" in report
-    assert "| both-refund | - | - | $0.0000 |" in report
+    assert (
+        f"**Correctness judge ({JUDGE_MODEL}):** 2 judgments, 20,000 input and "
+        "2,000 output tokens: about $0.0600."
+    ) in report
+    assert "| Faithfulness judge cost | Correctness judge cost |" in report
+    assert "| both-refund | 2 | $0.1500 | $0.0300 | $0.0600 |" in report
+    assert "| both-refund | - | - | $0.0000 | $0.0000 |" in report
+    assert "| both-refund | 2 | $0.1500 | - | - |" in report

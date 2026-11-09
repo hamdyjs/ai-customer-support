@@ -17,7 +17,8 @@ measures faithfulness, not whether the answer is right or complete.
 
 Each judged case is one more Claude call, on JUDGE_MODEL, which costs more than the
 assistant's own calls. A failed or malformed judgment is reported as an error for
-that case and never stops the run.
+that case and never stops the run. The judge model and the call itself, ask_judge,
+are shared with the correctness judge in scripts/judge_correctness.py.
 """
 
 import json
@@ -26,7 +27,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from anthropic import Anthropic, APIError, transform_schema
-from anthropic.types import Message
 from pydantic import BaseModel, Field, ValidationError
 
 from app.tools import TOOL_DEFINITIONS
@@ -118,10 +118,65 @@ class FaithfulnessResult:
         return [claim for claim in self.claims if claim.verdict in FAILING_CLAIMS]
 
     def estimated_cost(self) -> float:
-        return (
-            self.input_tokens * JUDGE_INPUT_COST_PER_MTOK
-            + self.output_tokens * JUDGE_OUTPUT_COST_PER_MTOK
-        ) / 1_000_000
+        return judge_cost(self.input_tokens, self.output_tokens)
+
+
+def judge_cost(input_tokens: int, output_tokens: int) -> float:
+    return (
+        input_tokens * JUDGE_INPUT_COST_PER_MTOK
+        + output_tokens * JUDGE_OUTPUT_COST_PER_MTOK
+    ) / 1_000_000
+
+
+@dataclass
+class JudgeAnswer[Output: BaseModel]:
+    output: Output | None  # None when there's no usable judgment
+    error: str = ""  # why there's no judgment
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+def ask_judge[Output: BaseModel](
+    client: Anthropic, system: str, prompt: str, output_model: type[Output]
+) -> JudgeAnswer[Output]:
+    """Make one structured-output call to the judge model, for any judge.
+
+    API failures, cut-off or refused responses, and output that doesn't fit the model
+    come back as an error message instead of an exception, so one bad judgment never
+    stops a run.
+    """
+    try:
+        response = client.messages.create(
+            model=JUDGE_MODEL,
+            max_tokens=JUDGE_MAX_TOKENS,
+            output_config={
+                "effort": "medium",
+                "format": {
+                    "type": "json_schema",
+                    "schema": transform_schema(output_model),
+                },
+            },
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except APIError as error:
+        return JudgeAnswer(None, f"The judge request failed: {error}")
+    answer: JudgeAnswer[Output] = JudgeAnswer(
+        None, "", response.usage.input_tokens, response.usage.output_tokens
+    )
+    if response.stop_reason != "end_turn":
+        answer.error = (
+            f"The judge returned no judgment: stop_reason={response.stop_reason}"
+        )
+        return answer
+    text = "".join(block.text for block in response.content if block.type == "text")
+    try:
+        answer.output = output_model.model_validate_json(text)
+    except ValidationError as error:
+        answer.error = (
+            f"The judge returned a malformed judgment: {error.errors()[0]['msg']}"
+        )
+    return answer
 
 
 def format_tool_result(call: "ToolCall") -> str:
@@ -156,42 +211,19 @@ def judge_prompt(question: str, reply: str, tool_calls: list["ToolCall"]) -> str
 def judge_faithfulness(
     client: Anthropic, question: str, reply: str, tool_calls: list["ToolCall"]
 ) -> FaithfulnessResult:
-    try:
-        response = client.messages.create(
-            model=JUDGE_MODEL,
-            max_tokens=JUDGE_MAX_TOKENS,
-            output_config={
-                "effort": "medium",
-                "format": {"type": "json_schema", "schema": transform_schema(Judgment)},
-            },
-            system=JUDGE_SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": judge_prompt(question, reply, tool_calls)}
-            ],
-        )
-    except APIError as error:
-        return FaithfulnessResult(Verdict.error, f"The judge request failed: {error}")
-    result = read_judgment(response)
-    result.input_tokens = response.usage.input_tokens
-    result.output_tokens = response.usage.output_tokens
-    return result
-
-
-def read_judgment(response: Message) -> FaithfulnessResult:
-    if response.stop_reason != "end_turn":
-        return FaithfulnessResult(
-            Verdict.error,
-            f"The judge returned no judgment: stop_reason={response.stop_reason}",
-        )
-    text = "".join(block.text for block in response.content if block.type == "text")
-    try:
-        judgment = Judgment.model_validate_json(text)
-    except ValidationError as error:
-        return FaithfulnessResult(
-            Verdict.error,
-            f"The judge returned a malformed judgment: {error.errors()[0]['msg']}",
-        )
-    failed = any(claim.verdict in FAILING_CLAIMS for claim in judgment.claims)
-    return FaithfulnessResult(
-        Verdict.failed if failed else Verdict.passed, judgment.summary, judgment.claims
+    answer = ask_judge(
+        client, JUDGE_SYSTEM_PROMPT, judge_prompt(question, reply, tool_calls), Judgment
     )
+    result = FaithfulnessResult(
+        Verdict.error,
+        answer.error,
+        input_tokens=answer.input_tokens,
+        output_tokens=answer.output_tokens,
+    )
+    if answer.output is not None:
+        judgment = answer.output
+        failed = any(claim.verdict in FAILING_CLAIMS for claim in judgment.claims)
+        result.verdict = Verdict.failed if failed else Verdict.passed
+        result.summary = judgment.summary
+        result.claims = judgment.claims
+    return result
